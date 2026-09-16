@@ -127,6 +127,37 @@ function callsInFile() {
   return calls;
 }
 
+/*
+ * What the page looks like before any of the above has run.
+ *
+ * `.empty` takes its entire layout from `data-mode`, and the markup used to set none, so the
+ * first paint was the full prompt - heading, paragraph, three buttons - until `paintPeers`
+ * replaced it. That is a screen for a mode nobody is in, shown for as long as it takes a phone
+ * to fetch and run this file, which on mobile data is comfortably a second.
+ */
+const html = fs.readFileSync(path.join(ROOT, 'web', 'index.html'), 'utf8');
+const EMPTY = /<div id="empty"([^>]*)>([\s\S]*?)<p class="seeking"/.exec(html);
+
+test('the empty state opens in the mode the app starts in', () => {
+  assert.ok(EMPTY, 'the empty state is no longer shaped the way this test reads it');
+  const mode = /data-mode="([a-z]+)"/.exec(EMPTY[1])?.[1];
+  assert.ok(mode, 'without a mode none of the mode styles apply and the full prompt is shown');
+
+  // Both directions. A mode here that the code no longer defaults to is its own flash.
+  // Read from the raw source: `code` has its string literals blanked, so the default this is
+  // looking for is one of the things that is no longer there.
+  const fallback = /discovery:\s*'([a-z]+)'/.exec(src)?.[1];
+  assert.equal(mode, fallback, 'the first paint and the default discovery mode disagree');
+});
+
+test('and it opens with that mode\u2019s own words', () => {
+  const mode = /data-mode="([a-z]+)"/.exec(EMPTY[1])[1];
+  // Otherwise the text is replaced on arrival even when the layout is not, which is the same
+  // flash in a smaller form.
+  assert.match(EMPTY[2], new RegExp(`data-i18n="empty\\.title\\.${mode}"`), 'the heading is swapped on arrival');
+  assert.match(EMPTY[2], new RegExp(`data-i18n="empty\\.body\\.${mode}"`), 'the body is swapped on arrival');
+});
+
 test('every function main.js calls is one that exists', () => {
   const declared = namesInScope();
   const missing = [...callsInFile()]

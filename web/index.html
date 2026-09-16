@@ -193,10 +193,21 @@
 <main id="stage">
   <section id="peers" class="peers" data-i18n-label="a11y.devices" aria-label="Devices"></section>
 
-  <div id="empty" class="empty">
-    <h1 data-i18n="empty.title">Open Gear Drop on your other devices</h1>
-    <p data-i18n="empty.body">Devices on this network appear here on their own. For one somewhere else, pair with a code or
-       open a room.</p>
+  <!--
+    Opened in the mode the app starts in, rather than in no mode at all.
+
+    `.empty` takes its whole layout from `data-mode`, and with the attribute missing none of the
+    local rules match: the first paint was the full prompt, heading and paragraph and all three
+    buttons, until `paintPeers` ran and replaced it. That is a flash of the screen for a mode
+    nobody is in, and it lasts as long as it takes the phone to fetch and run `main.js`.
+
+    `local` is the default in `app.prefs`, so this is what the first paint should be, and the two
+    strings are the ones that mode uses - no swap on arrival either. `paintPeers` still owns it
+    from then on and corrects both if the saved mode turns out to be something else.
+  -->
+  <div id="empty" class="empty" data-mode="local">
+    <h1 data-i18n="empty.title.local">Open Gear Drop on your other devices to send files</h1>
+    <p data-i18n="empty.body.local">Pair a device or open a room to be found on other networks</p>
     <p class="seeking" id="empty-seeking"><i aria-hidden="true"></i><span></span></p>
     <div class="empty-actions">
       <button id="btn-add-empty" class="cta" type="button">
