@@ -4498,3 +4498,80 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
     background: var(--accent-dim);
   }
 }
+
+/*
+ * ── solid on touch, because a blur is not free while you scroll ──
+ *
+ * `.sheet-body` is both a `backdrop-filter` surface and a scroll container. Those two on one
+ * element mean the compositor re-blurs the whole backdrop on every frame of every scroll, and
+ * Settings - the sheet with the most in it - is where that is felt. Thinning the radius made
+ * it cheaper; nothing makes it free.
+ *
+ * `--veil-solid` is the material this app already falls back to where `backdrop-filter` is
+ * missing, and the one it switches to while a sheet is being dragged. Using it here is not a
+ * downgrade nobody chose; it is the same surface, arrived at from the other direction.
+ */
+@media (hover: none) and (pointer: coarse) {
+  .sheet-body,
+  .about-body,
+  .menu,
+  .toast,
+  .share-bar,
+  .peer-menu-btn,
+  .cta,
+  .ghost-btn,
+  .icon-btn {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .sheet-body,
+  .menu,
+  .toast,
+  .share-bar,
+  .peer-menu-btn {
+    background-color: var(--veil-solid);
+  }
+
+  /*
+   * About is the other scroll container with blurs inside it, and the longest page here.
+   *
+   * Its detail panel, its links and its close button were the last five surfaces still asking
+   * the compositor for a blur on touch. They are the same three the no-backdrop-filter
+   * fallback already turns solid, so this is that material arrived at from the other side.
+   */
+  .about-detail,
+  .about-links a,
+  .about-close {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  /*
+   * The minus button, on every sheet a swipe already closes.
+   *
+   * A phone has a back gesture, and this app has swipe-to-dismiss on all of these. A third
+   * control doing the same job earns its corner on a desktop, where there is no gesture, and
+   * not here.
+   *
+   * `dialog:not([data-no-swipe])` is doing real work: `pass-dialog` cannot be swiped away, so
+   * its close button is the only way out and stays. Hidden rather than removed, and brought
+   * back by `:focus-visible`, so a switch, a keyboard or a screen reader still finds it.
+   */
+  dialog:not([data-no-swipe]) .close-x[data-close],
+  dialog:not([data-no-swipe]) .about-close[data-close] {
+    opacity: 0;
+    pointer-events: none;
+  }
+  dialog:not([data-no-swipe]) .close-x[data-close]:focus-visible,
+  dialog:not([data-no-swipe]) .about-close[data-close]:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* The heading had a button beside it; without one it can have the width back. */
+  dialog:not([data-no-swipe]) .sheet-body > h2 {
+    padding-right: 0;
+  }
+}

@@ -6,7 +6,7 @@
  * operating system hands one over through the share sheet, and even then it only carries
  * it across to the page. It is never uploaded, cached, or written anywhere.
  */
-const VERSION = 'gd-v2.54.0';
+const VERSION = 'gd-v2.55.0';
 const SHELL = [
   './',
   'index.html',

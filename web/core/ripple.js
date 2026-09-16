@@ -82,7 +82,16 @@ export class Radar {
   }
 
   resize() {
-    const dpr = Math.min(2, devicePixelRatio || 1);
+    /*
+     * Fewer fragments on a phone.
+     *
+     * The radar is soft rings on a dark ground: at 1.5 nobody can tell, and it is a quarter
+     * less of the screen to shade on the one device that is paying for it out of the same
+     * thermal budget as the modem and the display. It is the last thing in this app still
+     * drawing every frame.
+     */
+    const ceiling = matchMedia('(hover: none) and (pointer: coarse)').matches ? 1.5 : 2;
+    const dpr = Math.min(ceiling, devicePixelRatio || 1);
     const w = document.documentElement.clientWidth;
     const h = document.documentElement.clientHeight;
     // Centre the rings exactly on the beacon, so the two read as one object rather than
