@@ -88,6 +88,18 @@ wrangler deploy
 
 Your relay is then `wss://geardrop-relay.<subdomain>.workers.dev/rv`.
 
+**If the app is hosted anywhere else**, which it is on Vercel, tell the relay which origin
+may open a socket on it. Without this the relay refuses the connection and the app sits on
+"offline" with nothing on screen to say why:
+
+```bash
+echo "https://your-app.vercel.app" | wrangler secret put ALLOWED_ORIGINS
+```
+
+A relay that accepted any origin would be a relay any page on the internet could hold sockets
+on, so this is a refusal by design rather than a missing default. A client sending no `Origin`
+at all is not a browser and is left alone.
+
 Optional secrets:
 
 ```bash
