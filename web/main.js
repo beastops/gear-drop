@@ -5614,10 +5614,29 @@ let modalStack = [];
 function tuneDragSurface(dialog) {
   const body = dialog.querySelector('.sheet-body, .about-body');
   if (!body) return;
-  const scrolls = body.scrollHeight > body.clientHeight + 1;
-  dialog.classList.toggle('scrolls', scrolls);
-  // CSSOM, not a style attribute: the policy refuses the second and allows the first.
-  body.style.setProperty('touch-action', scrolls ? 'pan-y' : 'none');
+
+  const measure = () => {
+    const scrolls = body.scrollHeight > body.clientHeight + 1;
+    dialog.classList.toggle('scrolls', scrolls);
+    // CSSOM, not a style attribute: the policy refuses the second and allows the first.
+    body.style.setProperty('touch-action', scrolls ? 'pan-y' : 'none');
+  };
+
+  /*
+   * Measured again once it has stopped moving, and whenever it changes after that.
+   *
+   * Asked at `showModal()` the sheet is still scaling and sliding in, and the answer describes
+   * the animation rather than the sheet: on a real phone Settings reported that it scrolled
+   * when it ends up less than half the height of the window. A `ResizeObserver` fires when the
+   * layout settles, and again when the contents change - a device joining the list, a section
+   * opening - so a sheet that becomes scrollable later gives the gesture back to the browser,
+   * and one that stops scrolling takes it again.
+   */
+  if (!dialog._dragWatch) {
+    dialog._dragWatch = new ResizeObserver(measure);
+    dialog._dragWatch.observe(body);
+  }
+  measure();
 }
 
 /**
