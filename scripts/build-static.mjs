@@ -31,6 +31,8 @@ if (relay && !/^wss?:\/\//i.test(relay)) {
 await fs.rm(out, { recursive: true, force: true });
 await fs.cp(src, out, { recursive: true });
 
+await writeHeaders();
+
 if (relay) {
   // Only ever injected into a page's own <head>, and only as an attribute value with the
   // quote characters rejected outright rather than escaped.
@@ -66,6 +68,31 @@ for (const page of ['index.html', 'bench.html']) {
 }
 
 /** Put a tag at the end of a page's head, if the page exists. */
+/**
+ * Write Cloudflare Pages' `_headers`, from the same `vercel.json` Vercel reads.
+ *
+ * Everything this app relies on outside its own code is a response header: the CSP that enforces
+ * Trusted Types and refuses third-party origins, HSTS, the cross-origin isolation trio, the
+ * permissions policy. Vercel applies them from `vercel.json`; Cloudflare Pages reads a `_headers`
+ * file and nothing else. So moving hosts without carrying them across loses every one of them at
+ * once, and the app looks exactly the same while it happens.
+ *
+ * Generated rather than kept as a second copy. Two files holding the same list is how they drift,
+ * and a drifted security header is not a formatting difference - it is the protection being off
+ * on one of the two hosts, with nothing to say so.
+ */
+async function writeHeaders() {
+  const config = JSON.parse(await fs.readFile(path.join(root, 'vercel.json'), 'utf8'));
+  const lines = [];
+  for (const rule of config.headers || []) {
+    // Vercel matches `/(.*)`; Pages spells the same thing `/*`.
+    lines.push(rule.source === '/(.*)' ? '/*' : rule.source);
+    for (const { key, value } of rule.headers) lines.push(`  ${key}: ${value}`);
+    lines.push('');
+  }
+  await fs.writeFile(path.join(out, '_headers'), lines.join('\n'), 'utf8');
+}
+
 async function inject(file, tag) {
   let html;
   try {

@@ -263,6 +263,37 @@ nothing has been gained. Most browsers now use DNS-over-HTTPS by default in most
 And it hides *which* site, never *that you connected*. Your address still reaches an address.
 Only onion routing changes that, and it is not a setting.
 
+### Putting the app on Cloudflare too
+
+```bash
+npm install -g wrangler
+wrangler login
+npm run build
+wrangler pages deploy dist --project-name gear-drop
+```
+
+`dist/_headers` is written by the build from `vercel.json`, so Pages applies the same CSP, HSTS
+and cross-origin rules Vercel does. That file is the whole reason this is safe to do: every
+protection outside the app's own code is a response header, none of it is in the JavaScript, and
+a host move that left them behind would produce an app that looks identical and has no CSP. It
+is generated rather than copied so the two hosts cannot drift, and a test fails if they do.
+
+Then point the relay at it, so the app's origin is allowed to open sockets:
+
+```bash
+wrangler secret put ALLOWED_ORIGINS   # https://gear-drop.pages.dev
+```
+
+**The trade, which is real.** Today Vercel sees page loads and Cloudflare sees sockets, and
+neither alone can say who sent what to whom — they would have to compare notes. Move both and one
+company can see both halves. What you get for that is everyone *between* a person and Cloudflare —
+their ISP, the network they are on, anyone retaining traffic logs by law — losing the ability to
+tell this app was opened at all.
+
+Which matters more depends on who is being hidden from. For someone worried about a company, the
+split is better. For someone worried about their network, their employer or their government,
+ECH is worth more than the split, and it is not close.
+
 ## Behind an onion service (the anonymous one)
 
 Every option above hides what you send. None of them hides *that you sent it*, or to whom: the
