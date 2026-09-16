@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gear Drop — benchmark</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="bench.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand"><span>Gear&nbsp;Drop · benchmark</span></div>
+  <a class="pill pill-muted" href="./">back to the app</a>
+</header>
+
+<main>
+  <section class="card">
+    <h2>What this measures</h2>
+    <p class="dim">
+      Two peer connections inside this one page, so there is no network between them. That
+      isolates what the <em>engine</em> costs — chunking, AES-256-GCM, backpressure and the
+      streaming sink — from what the network costs. Stage 1 is the ceiling for this machine;
+      the later stages show how much of that ceiling the real pipeline keeps.
+    </p>
+    <div class="row gap wrap">
+      <label class="label">Size
+        <select id="size">
+          <option value="67108864">64 MB</option>
+          <option value="134217728" selected>128 MB</option>
+          <option value="536870912">512 MB</option>
+          <option value="1073741824">1 GB</option>
+          <option value="4294967296">4 GB</option>
+        </select>
+      </label>
+      <label class="label">Chunk
+        <select id="chunk">
+          <option value="16384">16 KB</option>
+          <option value="65536">64 KB (a common fixed default)</option>
+          <option value="262080" selected>256 KB (negotiated)</option>
+        </select>
+      </label>
+      <label class="label">Sink
+        <select id="sink">
+          <option value="none">discard</option>
+          <option value="opfs" selected>OPFS (stream to storage)</option>
+        </select>
+      </label>
+      <button id="run" class="primary" type="button">Run benchmark</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Results</h2>
+    <ul class="transfer-list" id="results"></ul>
+    <p class="hint dim" id="env">…</p>
+  </section>
+
+  <section class="card">
+    <h2>Reference points</h2>
+    <ul class="file-list">
+      <li><span>1 MB stop-and-wait at 50 ms RTT</span><span class="mono dim">≈ 160 Mb/s ceiling</span></li>
+      <li><span>1 MB stop-and-wait at 100 ms RTT</span><span class="mono dim">≈ 80 Mb/s ceiling</span></li>
+      <li><span>Typical default-configuration browser data channel</span><span class="mono dim">≈ 145 Mb/s</span></li>
+      <li><span>Peak JS heap while receiving, buffering design</span><span class="mono dim">≥ file size</span></li>
+      <li><span>Peak JS heap while receiving, streaming design</span><span class="mono dim">flat, ~10 MB</span></li>
+    </ul>
+  </section>
+</main>
+
+<script type="module" src="bench.js"></script>
+</body>
+</html>

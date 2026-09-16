@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a9bff"/>
+      <stop offset="1" stop-color="#0a5fd0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#plate)"/>
+  <!-- The mark sits well inside the maskable safe circle, so a round launcher does not clip it. -->
+  <path d="M12 3.1c3.75 4.3 6.25 7.75 6.25 10.6a6.25 6.25 0 0 1-12.5 0C5.75 10.85 8.25 7.4 12 3.1z M12 11.3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" fill="#fff" fill-rule="evenodd" transform="translate(32 32) scale(1.85) translate(-12 -12)"/>
+</svg>

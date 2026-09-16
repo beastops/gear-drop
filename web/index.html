@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gear Drop</title>
+<meta name="description" content="Device-to-device file transfer. The relay cannot read your files, impersonate a device, or link your devices across sessions.">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark light">
+<meta name="referrer" content="no-referrer">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" id="favicon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+
+<!-- gd:preload -->
+<!--
+  Every module the app needs, announced here rather than discovered a layer at a time.
+
+  This ships as plain ES modules with no bundler, so the browser cannot know a module exists
+  until it has parsed the one importing it — and the chain is four deep. Without these hints
+  the loader spends five round trips finding files it could have fetched at once.
+
+  The list is generated from the real import graph and checked by a test, so it cannot go
+  stale. Keep it after the stylesheet: thirty-six hints ahead of a render-blocking resource
+  would delay first paint to buy a faster boot.
+-->
+<link rel="modulepreload" href="core/bytes.js">
+<link rel="modulepreload" href="core/channel.js">
+<link rel="modulepreload" href="core/chat.js">
+<link rel="modulepreload" href="core/dust.js">
+<link rel="modulepreload" href="core/filename.js">
+<link rel="modulepreload" href="core/gdcrypto.js">
+<link rel="modulepreload" href="core/glass-gl.js">
+<link rel="modulepreload" href="core/ice.js">
+<link rel="modulepreload" href="core/picker.js">
+<link rel="modulepreload" href="core/platform.js">
+<link rel="modulepreload" href="core/qr.js">
+<link rel="modulepreload" href="core/ranges.js">
+<link rel="modulepreload" href="core/relay-transport.js">
+<link rel="modulepreload" href="core/ripple.js">
+<link rel="modulepreload" href="core/session.js">
+<link rel="modulepreload" href="core/signal.js">
+<link rel="modulepreload" href="core/sink.js">
+<link rel="modulepreload" href="core/store.js">
+<link rel="modulepreload" href="core/thumb.js">
+<link rel="modulepreload" href="core/transfer.js">
+<link rel="modulepreload" href="core/transport.js">
+<link rel="modulepreload" href="core/tt.js">
+<link rel="modulepreload" href="core/vault.js">
+<link rel="modulepreload" href="core/wordlist.js">
+<link rel="modulepreload" href="ui/i18n.js">
+<link rel="modulepreload" href="ui/swipe.js">
+<link rel="modulepreload" href="vendor/@noble/curves/abstract/curve.js">
+<link rel="modulepreload" href="vendor/@noble/curves/abstract/edwards.js">
+<link rel="modulepreload" href="vendor/@noble/curves/abstract/hash-to-curve.js">
+<link rel="modulepreload" href="vendor/@noble/curves/abstract/modular.js">
+<link rel="modulepreload" href="vendor/@noble/curves/abstract/montgomery.js">
+<link rel="modulepreload" href="vendor/@noble/curves/ed25519.js">
+<link rel="modulepreload" href="vendor/@noble/curves/utils.js">
+<link rel="modulepreload" href="vendor/@noble/hashes/_md.js">
+<link rel="modulepreload" href="vendor/@noble/hashes/_u64.js">
+<link rel="modulepreload" href="vendor/@noble/hashes/crypto.js">
+<link rel="modulepreload" href="vendor/@noble/hashes/sha2.js">
+<link rel="modulepreload" href="vendor/@noble/hashes/utils.js">
+<!-- /gd:preload -->
+</head>
+<body>
+<!--
+  The lens. A displacement map where 128 means "leave this pixel alone": flat through the
+  middle so labels stay readable, steep at the edges where glass actually bends.
+
+  Three passes, one per channel, each bent slightly differently — real glass does not refract
+  every wavelength equally, and that fringe is most of what separates a pane of glass from a
+  blurred rectangle.
+-->
+<svg class="gd-filters" width="0" height="0" aria-hidden="true" focusable="false">
+  <!--
+    A wobble for small controls.
+
+    The lens filter above is built for a wide pill and ramps its displacement from edge to
+    edge. On a 34-pixel circle there is no room for a ramp, so this is turbulence instead —
+    an irregular, organic distortion that reads as liquid at the rim of something small.
+    Published examples of this effect use a displacement scale around 77, which is tuned for
+    a 64-pixel tile; at this size that is a smear, so it runs at a fraction of it.
+  -->
+  <filter id="gd-wobble" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+    <feTurbulence type="turbulence" baseFrequency="0.014" numOctaves="2" seed="4" result="noise"/>
+    <feDisplacementMap in="SourceGraphic" in2="noise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+
+  <filter id="gd-lens" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feImage href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='h' x1='0' x2='1' y1='0' y2='0'%3E%3Cstop offset='0' stop-color='rgb(0,0,0)'/%3E%3Cstop offset='0.44' stop-color='rgb(128,0,0)'/%3E%3Cstop offset='0.56' stop-color='rgb(128,0,0)'/%3E%3Cstop offset='1' stop-color='rgb(255,0,0)'/%3E%3C/linearGradient%3E%3ClinearGradient id='v' x1='0' x2='0' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='rgb(0,0,0)'/%3E%3Cstop offset='0.44' stop-color='rgb(0,128,0)'/%3E%3Cstop offset='0.56' stop-color='rgb(0,128,0)'/%3E%3Cstop offset='1' stop-color='rgb(0,255,0)'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' fill='%23000'/%3E%3Crect width='100' height='100' fill='url(%23h)' style='mix-blend-mode:screen'/%3E%3Crect width='100' height='100' fill='url(%23v)' style='mix-blend-mode:screen'/%3E%3C/svg%3E" result="map" preserveAspectRatio="none" x="0" y="0" width="100%" height="100%"/>
+    <feGaussianBlur in="map" stdDeviation="1.2" result="m"/>
+
+    <feDisplacementMap in="SourceGraphic" in2="m" scale="44" xChannelSelector="R" yChannelSelector="G" result="dr"/>
+    <feDisplacementMap in="SourceGraphic" in2="m" scale="52" xChannelSelector="R" yChannelSelector="G" result="dg"/>
+    <feDisplacementMap in="SourceGraphic" in2="m" scale="61" xChannelSelector="R" yChannelSelector="G" result="db"/>
+
+    <feColorMatrix in="dr" type="matrix" result="r"
+      values="1 0 0 0 0
+              0 0 0 0 0
+              0 0 0 0 0
+              0 0 0 1 0"/>
+    <feColorMatrix in="dg" type="matrix" result="g"
+      values="0 0 0 0 0
+              0 1 0 0 0
+              0 0 0 0 0
+              0 0 0 1 0"/>
+    <feColorMatrix in="db" type="matrix" result="b"
+      values="0 0 0 0 0
+              0 0 0 0 0
+              0 0 1 0 0
+              0 0 0 1 0"/>
+
+    <feBlend in="r" in2="g" mode="screen" result="rg"/>
+    <feBlend in="rg" in2="b" mode="screen" result="rgb"/>
+
+    <feGaussianBlur in="rgb" stdDeviation="0.5" result="soft"/>
+    <feColorMatrix in="soft" type="saturate" values="1.6"/>
+  </filter>
+</svg>
+
+<canvas id="radar" aria-hidden="true"></canvas>
+
+<!--
+  The toolbar, left to right: who this is, whether it can reach anything, what you can do,
+  then the app's own controls. The status sits with the name because it is a fact rather than
+  a thing to press. The two groups on the right are separated by space rather than a rule.
+-->
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3.1c3.75 4.3 6.25 7.75 6.25 10.6a6.25 6.25 0 0 1-12.5 0C5.75 10.85 8.25 7.4 12 3.1z M12 11.3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" fill="currentColor" fill-rule="evenodd"/>
+    </svg>
+    <span class="brand-name">Gear Drop</span>
+
+    <!--
+      The state of the relay connection.
+
+      The text is in a span of its own so that a narrow screen can drop it and keep the dot,
+      without hiding it in a way that takes the words away from a screen reader too.
+    -->
+    <span id="link-state" class="chip" data-i18n-title="nav.relay">
+      <span class="chip-text">offline</span>
+    </span>
+  </div>
+
+  <nav class="actions" data-i18n-label="nav.label" aria-label="Main actions">
+    <button id="btn-add" class="icon-btn" type="button" data-i18n-title="connect.title">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-link"/></svg>
+    </button>
+    <button id="btn-room" class="icon-btn" type="button" data-i18n-title="room.title">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-room"/></svg>
+    </button>
+
+    <!--
+      Only here once there is something to show.
+
+      A button that opens a list of paired devices is meaningless until a device has been
+      paired, and until then it is one more thing in the way. It appears the moment the first
+      pairing lands and goes again if the last one is forgotten.
+    -->
+    <button id="btn-paired" class="icon-btn" type="button" data-i18n-title="devices.title">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-devices"/></svg>
+    </button>
+
+    <button id="btn-install" class="icon-btn" type="button" data-i18n-title="nav.install" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-install"/></svg>
+    </button>
+    <button id="btn-devices" class="icon-btn" type="button" data-i18n-title="settings.title">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gear"/></svg>
+    </button>
+    <button id="btn-about" class="icon-btn" type="button" data-i18n-title="nav.about">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-info"/></svg>
+    </button>
+  </nav>
+</header>
+
+<!-- share mode: files staged, waiting for a destination -->
+<section id="share-bar" class="share-bar" hidden aria-live="polite">
+  <span class="share-thumb" id="share-thumb" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><use href="#i-file"/></svg>
+  </span>
+  <div class="share-copy">
+    <div class="share-title" id="share-title">Ready to send</div>
+    <div class="share-sub" id="share-sub" data-i18n="share.pick">Pick a device below.</div>
+  </div>
+  <div class="share-actions">
+    <button id="share-cancel" class="ghost-btn" type="button" data-i18n="common.cancel">Cancel</button>
+  </div>
+</section>
+
+<main id="stage">
+  <section id="peers" class="peers" data-i18n-label="a11y.devices" aria-label="Devices"></section>
+
+  <div id="empty" class="empty">
+    <h1 data-i18n="empty.title">Open Gear Drop on your other devices</h1>
+    <p data-i18n="empty.body">Devices on this network appear here on their own. For one somewhere else, pair with a code or
+       open a room.</p>
+    <p class="seeking" id="empty-seeking"><i aria-hidden="true"></i><span></span></p>
+    <div class="empty-actions">
+      <button id="btn-add-empty" class="cta" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-link"/></svg>
+        <span data-i18n="action.addDevice">Add a device</span>
+      </button>
+      <button id="btn-room-empty" class="ghost-btn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-room"/></svg>
+        <span data-i18n="action.room">Open a room</span>
+      </button>
+      <button id="btn-network-empty" class="ghost-btn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-wifi"/></svg>
+        <span data-i18n="action.network">This network</span>
+      </button>
+    </div>
+  </div>
+
+  <p id="hint" class="hint" hidden>
+    <span class="desktop-only" data-i18n="hint.desktop">Click a device to send files, or drop them anywhere.</span>
+    <span class="mobile-only" data-i18n="hint.mobile">Tap a device to send files.</span>
+  </p>
+</main>
+
+<footer id="footer">
+  <!-- The radar is centred here: this is where "you" are on it. -->
+  <div class="beacon" id="beacon" aria-hidden="true">
+    <svg viewBox="0 0 24 24">
+      <path d="M12 3.1c3.75 4.3 6.25 7.75 6.25 10.6a6.25 6.25 0 0 1-12.5 0C5.75 10.85 8.25 7.4 12 3.1z M12 11.3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" fill="currentColor" fill-rule="evenodd"/>
+    </svg>
+  </div>
+
+  <div class="identity">
+    <span data-i18n="footer.knownAs">You’re known as</span>
+    <!-- The pencil lives inside the button: it is the same control, not a decoration
+         sitting next to one. -->
+    <button id="device-name" class="name-chip" type="button" data-i18n-title="footer.rename">
+      <span id="device-name-text">…</span>
+      <svg class="pen" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pen"/></svg>
+    </button>
+  </div>
+
+<!--
+    Who can find you, as one thing you can press.
+
+    This was a caption - "You can be found:" - followed by a tinted badge reading "this
+    network". Two elements to say one thing, and the half that was pressable was the half that
+    looked like a status light, so the most important setting on the screen did not look like a
+    setting at all. Now it is a single control that says the whole sentence, with a chevron on
+    it because that is what tells everyone, without being told, that pressing it leads
+    somewhere.
+  -->
+  <div class="discovery" id="discovery">
+    <button id="chip-discovery" class="ch-chip ch-local pointer" type="button">
+      <!-- No `data-i18n` here: which of the three this says is application state, and a
+           blanket re-translation would quietly reset it to the first one. `paintDiscovery`
+           owns it, and runs on a language change as well as on a state change. -->
+      <span id="disc-label">Visible on this network</span>
+      <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron"/></svg>
+    </button>
+    <button id="chip-paired" class="ch-chip ch-paired pointer" type="button" hidden>0 paired</button>
+  </div>
+
+</footer>
+
+<!-- ─────────────────────────────── add a device ─────────────────────────── -->
+<!--
+  Every sheet names itself.
+  A modal is announced when it opens, and without a name of its own the announcement is the
+  word "dialog" and nothing else - the one moment a screen reader user most needs to be told
+  where they have just been taken. Each points at its own visible title rather than repeating
+  it, so the two cannot drift apart and the name follows the language.
+-->
+<dialog id="connect-dialog" class="sheet" aria-labelledby="connect-title">
+  <div class="sheet-body rail-accent">
+    <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+
+    <h2><span id="connect-title" data-i18n="connect.title">Add a device</span>
+      <span class="h2-sub" data-i18n="connect.sub">Pair once. After that it reconnects on its own, with no code.</span>
+    </h2>
+
+    <div class="connect-split">
+      <div class="pane">
+        <div class="pane-label" data-i18n="connect.show">Show this code</div>
+        <div id="code-display" class="code-display">
+          <div class="code-row" id="host-code"><span>·</span><span>·</span><span>·</span><span>·</span><span>·</span><span>·</span></div>
+          <div class="qr-frame" id="qr-frame" data-i18n-title="a11y.qrHint" title="Scan it, or click to copy the link">
+            <canvas id="host-qr" width="160" height="160" data-i18n-label="a11y.qrPair" aria-label="Pairing QR code"></canvas>
+          </div>
+          <div class="code-meta">
+            <span id="code-timer">valid 2:00</span>
+            <button id="btn-copy-link" class="ghost-btn" type="button" data-i18n="common.copy">Copy link</button>
+          </div>
+        </div>
+        <button id="btn-host" class="cta wide" type="button" data-i18n="connect.generate">Generate a code</button>
+      </div>
+
+      <div class="or"><span data-i18n="common.or">or</span></div>
+
+      <div class="pane">
+        <div class="pane-label" data-i18n="connect.enter">Enter their code</div>
+        <div class="code-input-row" id="code-inputs">
+          <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.codeChar" data-i18n-n="1" aria-label="Code character 1">
+          <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.codeChar" data-i18n-n="2" aria-label="Code character 2">
+          <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.codeChar" data-i18n-n="3" aria-label="Code character 3">
+          <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.codeChar" data-i18n-n="4" aria-label="Code character 4">
+          <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.codeChar" data-i18n-n="5" aria-label="Code character 5">
+          <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.codeChar" data-i18n-n="6" aria-label="Code character 6">
+        </div>
+        <p class="muted small" id="join-status" data-i18n="connect.hint">Six characters. O reads as 0, I and L as 1. One wrong guess kills the code.</p>
+      </div>
+    </div>
+
+  </div>
+</dialog>
+
+<!-- ────────────────────────────────── room ──────────────────────────────── -->
+<dialog id="room-dialog" class="sheet" aria-labelledby="room-title">
+  <div class="sheet-body rail-room">
+    <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+
+    <h2><span id="room-title" data-i18n="room.title">Room</span>
+      <span class="h2-sub" data-i18n="room.sub">A five-character code everyone types in. Anyone in the room can see everyone else.</span>
+    </h2>
+
+    <div id="room-invite" hidden>
+      <p class="warn-note" id="room-invite-what" data-i18n="room.inviteWhat">This link wants to put you in a room. Everyone in it will see your device name and that you’re
+         online.</p>
+      <div class="code-display">
+        <div class="code-row" id="room-invite-code"><span>·</span><span>·</span><span>·</span><span>·</span><span>·</span></div>
+      </div>
+      <div class="row-buttons">
+        <button id="btn-room-invite-no" class="ghost-btn" type="button" data-i18n="common.cancel">Cancel</button>
+        <button id="btn-room-invite-yes" class="cta" type="button" data-i18n="room.inviteJoin">Join the room</button>
+      </div>
+    </div>
+
+    <div id="room-inactive">
+      <div class="connect-split">
+        <div class="pane">
+          <div class="pane-label" data-i18n="room.create">Create one</div>
+          <button id="btn-room-create" class="cta wide" type="button" data-i18n="room.createBtn">Open a room</button>
+          <p class="muted small" data-i18n="room.createHint">You get a code to read out. It works for anyone who types it, on any network.</p>
+        </div>
+        <div class="or"><span data-i18n="common.or">or</span></div>
+        <div class="pane">
+          <div class="pane-label" data-i18n="room.join">Join one</div>
+          <div class="code-input-row" id="room-inputs">
+            <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.roomChar" data-i18n-n="1" aria-label="Room character 1">
+            <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.roomChar" data-i18n-n="2" aria-label="Room character 2">
+            <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.roomChar" data-i18n-n="3" aria-label="Room character 3">
+            <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.roomChar" data-i18n-n="4" aria-label="Room character 4">
+            <input maxlength="1" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" data-i18n-label="a11y.roomChar" data-i18n-n="5" aria-label="Room character 5">
+          </div>
+          <p class="muted small" id="room-join-status" data-i18n="room.joinHint">Five characters.</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="room-active" hidden>
+      <div class="code-display">
+        <div class="code-row" id="room-code"><span>·</span><span>·</span><span>·</span><span>·</span><span>·</span></div>
+        <div class="qr-frame" id="room-qr-frame" data-i18n-title="a11y.qrHint" title="Scan it, or click to copy the link">
+          <canvas id="room-qr" width="160" height="160" data-i18n-label="a11y.qrRoom" aria-label="Room QR code"></canvas>
+        </div>
+      </div>
+      <div class="meta-grid gap-above">
+        <span class="muted" data-i18n="room.members">In the room</span><span id="room-count" class="mono">1</span>
+      </div>
+      <div class="row-buttons gap-above">
+        <button id="btn-room-copy" class="ghost-btn" type="button" data-i18n="common.copy">Copy link</button>
+        <button id="btn-room-leave" class="ghost-btn danger" type="button" data-i18n="room.leave">Leave the room</button>
+      </div>
+    </div>
+
+    <p class="footnote" data-i18n="room.foot">Anyone with the code can join, so check the safety words before you send.</p>
+  </div>
+</dialog>
+
+<!-- ────────────────────────── how you can be found ─────────────────────── -->
+<dialog id="network-dialog" class="sheet" aria-labelledby="network-title">
+  <div class="sheet-body rail-local">
+    <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+
+    <h2><span id="network-title" data-i18n="disc.title">Who can find you</span>
+      <span class="h2-sub" data-i18n="disc.sub">Paired devices always reach you. This sets who else can.</span>
+    </h2>
+
+    <div class="choice-list" id="discovery-choices" role="radiogroup" data-i18n-label="a11y.discovery" aria-label="Discovery">
+      <button class="choice" type="button" role="radio" data-mode="off" aria-checked="true">
+        <span class="choice-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-lock"/></svg></span>
+        <span class="choice-text">
+          <b data-i18n="disc.off">Nobody</b>
+          <span data-i18n="disc.offSub">Only devices you’ve already paired can reach you.</span>
+        </span>
+      </button>
+
+      <button class="choice ch-local" type="button" role="radio" data-mode="local" aria-checked="false">
+        <span class="choice-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-wifi"/></svg></span>
+        <span class="choice-text">
+          <b data-i18n="disc.local">This network</b>
+          <span data-i18n="disc.localSub">Devices on the same network as you, with no code to type.</span>
+        </span>
+      </button>
+
+      <button class="choice ch-room" type="button" role="radio" data-mode="public" aria-checked="false">
+        <span class="choice-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-room"/></svg></span>
+        <span class="choice-text">
+          <b data-i18n="disc.public">Anyone with your code</b>
+          <span data-i18n="disc.publicSub">Works on any network. You read out five characters.</span>
+        </span>
+      </button>
+    </div>
+
+    <!-- what the selected mode actually costs -->
+    <!--
+      The prose folds away; anything you can act on does not.
+
+      This sheet is a choice between three things, and it had grown to seven hundred pixels -
+      most of it an explanation of the option you had already picked. The explanation is worth
+      keeping: it is the part that says what each setting costs you, and this app's whole claim
+      is about that. It is just not worth showing before it is asked for. What stays in the
+      open is the choice itself, the room code, and the line of live status - the things that
+      are either an action or an answer.
+    -->
+    <div id="disc-note-off" class="disc-note">
+      <details class="disc-more">
+        <summary data-i18n="disc.more">What this means</summary>
+      <p class="footnote" data-i18n="disc.noteOff">Only your paired devices can still reach you. Nobody else sees this device at all.</p>
+      </details>
+    </div>
+
+    <div id="disc-note-local" class="disc-note" hidden>
+      <details class="disc-more">
+        <summary data-i18n="disc.more">What this means</summary>
+      <ol class="explain">
+        <li data-i18n="net.p1"><b>How it works.</b> The relay gives your network a label and hands the same one to every device connecting from there. Devices with this on use it to find each other.</li>
+        <li data-i18n="net.p2"><b>What it costs.</b> For six hours at a time, the relay can tell that two devices are on the same network. It still can’t see your files, their names or their sizes.</li>
+        <li data-i18n="net.p3"><b>Still check.</b> A device found this way stays unverified until you confirm the safety words.</li>
+      </ol>
+      </details>
+      <p class="muted small" id="net-status" data-i18n="net.statusOff">Hidden from this network</p>
+    </div>
+
+    <div id="disc-note-public" class="disc-note" hidden>
+      <div class="code-display">
+        <div class="code-row" id="public-code"><span>·</span><span>·</span><span>·</span><span>·</span><span>·</span></div>
+        <div class="qr-frame" id="public-qr-frame" data-i18n-title="a11y.qrHint" title="Scan it, or click to copy the link">
+          <canvas id="public-qr" width="150" height="150" data-i18n-label="a11y.qrPublic" aria-label="Discovery QR code"></canvas>
+        </div>
+        <div class="code-meta">
+          <span id="public-count">1</span>
+          <button id="btn-public-copy" class="ghost-btn" type="button" data-i18n="common.copy">Copy link</button>
+          <button id="btn-public-new" class="ghost-btn" type="button" data-i18n="disc.newCode">New code</button>
+        </div>
+      </div>
+      <details class="disc-more">
+        <summary data-i18n="disc.more">What this means</summary>
+      <p class="footnote" data-i18n="disc.notePublic">Anyone with your code can see you, on any network. Check the safety words before you send. A new code cancels the old one.</p>
+      </details>
+    </div>
+  </div>
+</dialog>
+
+<!-- ───────────────────────────── paired devices ─────────────────────────── -->
+<dialog id="devices-dialog" class="sheet" aria-labelledby="settings-title">
+  <div class="sheet-body rail-paired">
+    <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+
+    <h2><span id="settings-title" data-i18n="settings.title">Settings</span>
+      <span class="h2-sub" data-i18n="settings.sub">Everything here stays on this device. Nothing syncs anywhere.</span>
+    </h2>
+
+    <!--
+      Appearance and language live here rather than on the toolbar.
+
+      A toolbar is the app's functional layer, and it earns its place by holding what you
+      reach for while using the app. Theme and language are settings: chosen once, changed
+      rarely, and the cost of keeping them on screen was four permanent icons competing with
+      the three actions that actually do something.
+    -->
+    <div class="setting-row">
+      <div class="who">
+        <b data-i18n="settings.appearance">Appearance</b>
+        <span data-i18n="settings.appearanceSub">Follow the system, or pick one.</span>
+      </div>
+      <div class="row-tools">
+      <div class="seg" role="group" data-i18n-label="a11y.theme" aria-label="Theme">
+        <button id="theme-auto" class="icon-btn" type="button" data-theme-choice="auto" aria-pressed="false" data-i18n-title="theme.auto" title="Match the system" aria-label="Match the system">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-auto"/></svg>
+        </button>
+        <button id="theme-light" class="icon-btn" type="button" data-theme-choice="light" aria-pressed="false" data-i18n-title="theme.light" title="Light" aria-label="Light">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sun"/></svg>
+        </button>
+        <button id="theme-dark" class="icon-btn" type="button" data-theme-choice="dark" aria-pressed="false" data-i18n-title="theme.dark" title="Dark" aria-label="Dark">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-moon"/></svg>
+        </button>
+      </div>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="who">
+        <b data-i18n="settings.language">Language</b>
+        <span data-i18n="settings.languageSub">A language appears here once it’s fully translated.</span>
+      </div>
+      <div class="row-tools">
+      <button id="btn-lang" class="icon-btn" type="button" data-i18n-title="lang.title" title="Language" aria-label="Language">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-globe"/></svg>
+      </button>
+      </div>
+    </div>
+
+    <!-- The one setting that changes what a copied database is worth. -->
+    <div class="setting-row">
+      <div class="who">
+        <b data-i18n="lock.setting">Lock with a passphrase</b>
+        <span id="lock-state" data-i18n="lock.settingOff">Your browser holds the key, so anyone who copies this profile can open it elsewhere.</span>
+      </div>
+      <!--
+        Three actions once a passphrase exists, and one before.
+
+        `lock now` puts the device back behind the passphrase without closing the tab, which
+        is the thing to reach for when you are handing the laptop to someone. Both of the
+        extra two are hidden until there is a passphrase for them to act on.
+      -->
+      <div class="row-tools">
+        <button id="btn-lock-now" class="ghost-btn" type="button" data-i18n="lock.lockNow" hidden>Lock now</button>
+        <button id="btn-lock-change" class="ghost-btn" type="button" data-i18n="lock.change" hidden>Change</button>
+        <button id="btn-lock-set" class="ghost-btn" type="button" data-i18n="lock.turnOn">Set</button>
+      </div>
+    </div>
+
+    <div class="device-rows" id="device-rows"></div>
+
+  </div>
+</dialog>
+
+<!-- ──────────────────────────────── the lock ───────────────────────────── -->
+<!--
+  Shown before anything else when a passphrase is set, and there is no way past it: the
+  records are not merely hidden, there is no key on this device to read them with.
+-->
+<dialog id="lock-dialog" class="sheet" data-no-swipe aria-labelledby="lock-title">
+  <div class="sheet-body rail-accent">
+    <h2><span id="lock-title" data-i18n="lock.title">Locked</span>
+      <span class="h2-sub" data-i18n="lock.sub">This device is protected by a passphrase. Nothing here can be read without it.</span>
+    </h2>
+
+    <form id="lock-form" class="lock-form">
+      <input id="lock-pass" class="lock-input" type="password" autocomplete="current-password"
+             data-i18n-placeholder="lock.passphrase" data-i18n-label="lock.passphrase"
+             placeholder="Passphrase" spellcheck="false">
+      <button class="cta wide" type="submit" data-i18n="lock.unlock">Unlock</button>
+    </form>
+    <p class="muted small" id="lock-error" data-i18n="lock.wrong" hidden>That passphrase didn’t work</p>
+    <p class="muted small" data-i18n="lock.noReset">It can’t be reset. Everything stays locked, so the only way in is to erase it all and start again.</p>
+    <!--
+      The way out for someone who cannot get in.
+      Not a recovery: it erases what the passphrase was protecting, which is the only thing
+      that can be done without it. Set apart from Unlock so it is never the reflex.
+    -->
+    <button id="btn-lock-forgot" class="ghost-btn danger wide" type="button" data-i18n="lock.forgot">Forgotten it? Start fresh</button>
+  </div>
+</dialog>
+
+<!-- ──────────────────────── choosing a passphrase ──────────────────── -->
+<!--
+  Setting, changing and removing the passphrase, in the app rather than in a browser prompt.
+
+  A prompt shows what is typed into it. For the one field in this app whose whole purpose is
+  that nobody at this machine can read the data, typing the answer in the clear on screen was
+  the wrong shape — and where prompts are unavailable the setting simply did nothing. Masked
+  by default, revealable on purpose, and a suggestion that can be read because a passphrase
+  nobody can write down is a passphrase nobody keeps.
+-->
+<dialog id="pass-dialog" class="sheet" data-no-swipe aria-labelledby="pass-title">
+  <div class="sheet-body rail-accent">
+    <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+
+    <h2><span id="pass-title"></span>
+      <span class="h2-sub" id="pass-sub"></span>
+    </h2>
+
+    <div class="pass-suggest" id="pass-suggest" hidden>
+      <span class="pass-suggest-label" data-i18n="lock.suggested">Suggested</span>
+      <code id="pass-suggested"></code>
+      <button id="btn-pass-use" class="ghost-btn" type="button" data-i18n="lock.useSuggestion">Use this one</button>
+    </div>
+
+    <form id="pass-form" class="lock-form">
+      <input id="pass-one" class="lock-input" type="password" autocomplete="new-password" spellcheck="false">
+      <input id="pass-two" class="lock-input" type="password" autocomplete="new-password" spellcheck="false" hidden>
+      <button id="btn-pass-show" class="ghost-btn" type="button" data-i18n="lock.show">Show</button>
+      <button id="btn-pass-go" class="cta" type="submit"></button>
+    </form>
+    <p class="muted small" id="pass-error" hidden></p>
+  </div>
+</dialog>
+
+<!-- ───────────────────────────────── verify ─────────────────────────────── -->
+<!--
+  Paired devices, on their own.
+
+  These used to be a section at the bottom of Settings, under appearance and language and four
+  preferences, which put the list of machines this device trusts below the choice of light or
+  dark. They are not the same kind of thing: one is how the app looks, the other is who it will
+  open the door to. Its own sheet, reached from its own button, and Settings is left to be
+  settings.
+-->
+<dialog id="paired-dialog" class="sheet" aria-labelledby="paired-title">
+  <div class="sheet-body rail-paired">
+    <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+
+    <h2><span id="paired-title" data-i18n="devices.title">Paired devices</span>
+      <span class="h2-sub" data-i18n="devices.sub">Remembered on this device only. Nothing is kept on a server.</span>
+    </h2>
+
+    <div class="device-rows" id="paired-rows"></div>
+    <p class="muted small" id="devices-empty" data-i18n="devices.empty" hidden>Nothing paired yet.</p>
+
+    <p class="footnote" data-i18n="devices.foot">Auto-accept takes files without asking you first. Use it only for your own devices.</p>
+  </div>
+</dialog>
+
+<dialog id="verify-dialog" class="sheet" data-no-swipe aria-labelledby="verify-title">
+  <div class="sheet-body center rail-accent">
+    <div class="verify-glyph" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><use href="#i-shield"/></svg>
+    </div>
+    <h2 id="verify-title" data-i18n="verify.title">Confirm the safety words</h2>
+    <p class="muted small" data-i18n="verify.body">Both devices should show the same four words. If they differ, something is sitting between you.</p>
+    <div class="sas" id="verify-words">…</div>
+    <!-- Who asked, when it was the other device that did. Filled from script: it carries a name. -->
+    <p class="muted small" id="verify-asked" hidden></p>
+    <!--
+      What saying yes actually does, shown only when it would do it. For a device already
+      remembered this is a check and nothing else, and promising to remember it again would
+      be noise.
+    -->
+    <p class="muted small" id="verify-pairs" data-i18n="verify.pairs" hidden>Confirming remembers this device, so you won’t need a code next time.</p>
+    <div class="row-buttons">
+      <button id="btn-sas-bad" class="ghost-btn danger" type="button" data-i18n="verify.no">They differ</button>
+      <button id="btn-sas-ok" class="cta" type="button" data-i18n="verify.yes">They match</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ──────────────────────────────── incoming ────────────────────────────── -->
+<dialog id="incoming-dialog" class="sheet" aria-labelledby="incoming-title">
+  <form method="dialog" class="sheet-body rail-accent">
+    <h2 id="incoming-title">Incoming</h2>
+    <div class="meta-grid">
+      <span class="muted" data-i18n="incoming.from">From</span><span id="incoming-from" class="strong"></span>
+      <span class="muted" data-i18n="incoming.sas">Safety words</span><span id="incoming-sas" class="mono"></span>
+      <span class="muted" data-i18n="incoming.size">Size</span><span id="incoming-size" class="mono"></span>
+    </div>
+    <ul class="file-list" id="incoming-files"></ul>
+    <!--
+      What the offer is a picture of, when it is a picture and the sender's browser could
+      render one. The bytes came with the offer rather than after it, so this is the one
+      thing on the sheet that arrived before the answer did; it is held in memory, drawn from
+      a blob URL that is released when the sheet closes, and never written anywhere.
+    -->
+    <figure class="incoming-preview" id="incoming-preview" hidden>
+      <img id="incoming-preview-img" alt="" decoding="async" />
+    </figure>
+    <p class="warn-note" id="incoming-warn" hidden></p>
+    <p class="muted small" id="incoming-sink-hint"></p>
+    <label class="sas-gate" id="incoming-gate" hidden>
+      <input type="checkbox" id="incoming-confirm" />
+      <span data-i18n="incoming.confirm">The same words are on the other screen</span>
+    </label>
+    <div class="row-buttons">
+      <button value="decline" class="ghost-btn" data-i18n="incoming.decline">Decline</button>
+      <button value="accept" class="cta" id="btn-accept" data-i18n="incoming.accept">Accept</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ─────────────────────────────── send text ────────────────────────────── -->
+<!--
+  The conversation. Sealed with the same key the app uses for its own identity and keyed on
+  the peer, so it is simply there again the next time that device is.
+-->
+<dialog id="chat-dialog" class="sheet" aria-labelledby="chat-title">
+  <div class="sheet-body rail-accent chat-sheet">
+    <!--
+      The two controls that act on the whole conversation sit together, above it.
+
+      Deleting everything was a wide red button under the composer, directly below Send - the
+      two things you are most likely to hit in a hurry, next to each other, one of them
+      irreversible. It is a quiet icon up here instead, beside Close, which is where a thing
+      that acts on the whole sheet belongs.
+    -->
+    <div class="chat-head-tools">
+      <button id="btn-chat-clear" class="close-x" type="button" data-i18n-title="chat.clear" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"/></svg>
+      </button>
+      <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+      </button>
+    </div>
+
+    <h2><span id="chat-title" data-i18n="chat.title">Chat</span>
+      <span class="h2-sub"><span data-i18n="chat.with">With</span> <span id="chat-who" class="strong"></span></span>
+    </h2>
+
+    <!--
+      What is protecting this conversation, where the conversation is. Reads live, because a
+      direct path can drop mid-sentence and the relay take over underneath you.
+    -->
+    <div class="chat-secure" id="chat-secure" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-lock"/></svg>
+      <span id="chat-secure-text"></span>
+      <!--
+        Encrypted is not the same as encrypted *to the right person*, and only the safety words
+        settle the difference. Where they have not been checked this says so, rather than
+        letting a padlock imply a guarantee nobody has confirmed yet.
+      -->
+      <span id="chat-secure-warn" class="chat-secure-warn" hidden></span>
+    </div>
+
+    <!--
+      `role="log"` with a polite live region: a screen reader announces a message as it lands
+      without interrupting whatever is being read, which is what a conversation wants.
+    -->
+    <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions"></div>
+
+    <p class="chat-note muted small" id="chat-empty" data-i18n="chat.empty" hidden>
+      Nothing here yet. Anything either of you sends stays on your two devices.
+    </p>
+    <p class="chat-note muted small" id="chat-locked" data-i18n="chat.locked" hidden>A chat is saved here, but this browser can’t unlock it any more. New messages start a fresh one.</p>
+    <p class="chat-note muted small" id="chat-ephemeral" data-i18n="chat.ephemeral" hidden>Not paired, so this chat lasts only as long as the tab. Pair to keep it.</p>
+    <p class="chat-note muted small" id="chat-offline" data-i18n="chat.offline" hidden>Not connected. What you write is sent when this device is back.</p>
+    <!--
+      The other kind of gone, which the note above was quietly getting wrong.
+
+      "Wait until it is back" is true of a paired device and false of every other one. An
+      unpaired device announces a freshly random identity each time it joins the network -
+      deliberately, so that nothing durable about it is broadcast - which means the address
+      this conversation is held at stops existing the moment it leaves. It may well already be
+      back on the radar, under a name this window can no longer reach, while the window sits
+      there promising it will resume. It will not. Better to say so and point at the thing
+      that would have prevented it.
+    -->
+    <p class="chat-note muted small" id="chat-gone" data-i18n="chat.gone" hidden>This device has gone. Devices you haven’t paired with get a new name each time they join, so this chat can’t carry on. Pair to keep the next one.</p>
+
+    <form class="chat-composer" id="chat-composer">
+      <!--
+        Pictures and files go through the same offer the tile uses, so the receiving side sees
+        the transfer it already knows how to handle - the confirmation, the safety words, the
+        write straight to storage. Nothing about a file changes because it was sent from here.
+      -->
+      <button id="btn-chat-attach" class="chat-attach" type="button" data-i18n-title="chat.attach"
+              aria-label="Send a picture or file">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+      </button>
+      <!--
+        The one field a browser would happily send elsewhere: enhanced spell check uploads what
+        is typed, autocomplete keeps it on disk, and writing assistants read the box directly.
+
+        `autocorrect` and `autocapitalize` stay on — those run on the device.
+      -->
+      <textarea id="chat-input" class="chat-input" rows="1"
+                spellcheck="false" autocomplete="off"
+                data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
+                data-i18n-placeholder="chat.placeholder"
+                data-i18n-label="chat.placeholder" placeholder="Message"></textarea>
+      <!--
+        Hold-to-talk is the obvious gesture and the wrong one here: it cannot be operated
+        from a keyboard, and a five-minute recording would mean holding a finger down for
+        five minutes. Press to start, press to stop, with the elapsed time and a way out
+        shown above the composer while it runs.
+      -->
+      <button id="btn-chat-mic" class="chat-attach" type="button" data-i18n-title="chat.record"
+              aria-pressed="false" aria-label="Record a voice message" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mic"/></svg>
+      </button>
+      <button id="btn-chat-send" class="cta" type="submit" data-i18n-title="common.send"
+              aria-label="Send">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-send"/></svg>
+      </button>
+    </form>
+
+    <!--
+      Announced as it appears, because the one thing that matters about a live microphone is
+      knowing it is live.
+    -->
+    <div class="chat-rec" id="chat-rec" role="status" hidden>
+      <span class="rec-dot" aria-hidden="true"></span>
+      <span data-i18n="chat.recording">Recording</span>
+      <span class="rec-time" id="chat-rec-time">0:00</span>
+      <button id="btn-rec-cancel" class="ghost-btn" type="button" data-i18n="common.cancel">Cancel</button>
+    </div>
+
+  </div>
+</dialog>
+
+<!-- ───────────────────────────── received text ──────────────────────────── -->
+
+
+<!-- ─────────────────────────── a link proposing a relay ─────────────────── -->
+<dialog id="relay-dialog" class="sheet" data-no-swipe aria-labelledby="relay-title">
+  <div class="sheet-body rail-accent">
+    <h2><span id="relay-title" data-i18n="relay.title">This link wants to change your relay</span>
+      <span class="h2-sub" data-i18n="relay.sub">A relay introduces your devices to each other. It never sees your files, only who you meet and when.</span>
+    </h2>
+
+    <div class="meta-grid">
+      <span class="muted" data-i18n="relay.current">Currently</span><span id="relay-current" class="mono"></span>
+      <span class="muted" data-i18n="relay.proposed">This link wants</span><span id="relay-proposed" class="mono strong"></span>
+    </div>
+
+    <ol class="explain">
+      <li data-i18n="relay.p1"><b>It can’t</b> read a file, a name or a message. Those stay locked the whole way.</li>
+      <li data-i18n="relay.p2"><b>It can</b> see which devices you meet and when, and it could try to sit in the middle. That’s what the safety words catch.</li>
+      <li data-i18n="relay.p3"><b>Not expecting this?</b> Keep yours. A link that quietly swaps your relay is how someone would watch who you talk to.</li>
+    </ol>
+
+    <div class="row-buttons">
+      <button id="relay-accept" class="ghost-btn danger" type="button" data-i18n="relay.accept">Use the new relay</button>
+      <button id="relay-keep" class="cta" type="button" data-i18n="relay.keep">Keep mine</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ──────────────────────────────── language ────────────────────────────── -->
+<dialog id="lang-dialog" class="sheet" aria-labelledby="lang-title">
+  <div class="sheet-body">
+    <button class="close-x" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+    <h2><span id="lang-title" data-i18n="lang.title">Language</span>
+      <span class="h2-sub" data-i18n="lang.sub">Each one shows how much of it is translated.</span>
+    </h2>
+    <ul class="lang-list" id="lang-list"></ul>
+  </div>
+</dialog>
+
+<!-- ────────────────────────────────── about ─────────────────────────────── -->
+<dialog id="about-dialog" class="full" data-i18n-label="nav.about" aria-label="About Gear Drop">
+  <div class="about-body">
+    <button class="about-close" data-close type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus"/></svg>
+    </button>
+
+    <svg class="about-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3.1c3.75 4.3 6.25 7.75 6.25 10.6a6.25 6.25 0 0 1-12.5 0C5.75 10.85 8.25 7.4 12 3.1z M12 11.3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" fill="currentColor" fill-rule="evenodd"/>
+    </svg>
+    <div class="about-name">Gear Drop <sup id="about-version">v0.7</sup></div>
+    <p class="about-tag" data-i18n="about.tag">The relay can’t read your files, pretend to be one of your devices, or recognise you from one visit to the next.</p>
+
+    <div class="about-links">
+      <a href="bench.html" data-i18n-title="nav.bench" title="Benchmark" aria-label="Benchmark"><svg viewBox="0 0 24 24"><use href="#i-bolt"/></svg></a>
+      <a href="#" id="about-how" data-i18n-title="nav.how" title="How it works" aria-label="How it works"><svg viewBox="0 0 24 24"><use href="#i-lock"/></svg></a>
+      <a href="#" id="about-install" data-i18n-title="nav.install" title="Install" aria-label="Install Gear Drop"><svg viewBox="0 0 24 24"><use href="#i-install"/></svg></a>
+    </div>
+
+    <div class="about-detail">
+      <ol class="explain">
+        <li data-i18n="about.p1"><b>The code is the password.</b> Both devices turn it into the same key without ever sending it. The relay can’t work the key out, and it gets one guess at the code.</li>
+        <li data-i18n="about.p2"><b>Everything is locked before it leaves.</b> File names and sizes too, and each one is padded so the relay can’t guess how long it was.</li>
+        <li data-i18n="about.p3"><b>Safety words.</b> Both devices work out the same four words from the connection itself. If someone’s in the middle, the two lists won’t match.</li>
+        <li data-i18n="about.p4"><b>Files go straight to disk.</b> Nothing piles up in memory, so a huge file needs no more room than a small one.</li>
+        <li data-i18n="about.p5"><b>Paired devices stay anonymous.</b> They meet under a name that changes every ten minutes, so the relay never sees the same one twice.</li>
+        <li data-i18n="about.pq"><b>Built for later, too.</b> The key is agreed in two separate ways at once, and you’d have to break both. One of them is designed to hold up against quantum computers, so a recording saved today stays shut.</li>
+        <li data-i18n="about.addr"><b>Your address.</b> On the same network, devices use a throwaway name and your real address is never looked up. Further away, everything goes through the relay, so the other device learns nothing about where you are. The relay still sees the address you connect from, like any website does.</li>
+        <li data-i18n="about.p6"><b>One thing to know.</b> This is a web page, so every time you open it you’re trusting the code it sends you. Everything else is built so that’s the only thing you have to trust.</li>
+      </ol>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast-host" class="toast-host" aria-live="polite"></div>
+
+<svg class="sprite" aria-hidden="true">
+  <!--
+    One grid, one weight.
+
+    The set before this was solid silhouettes drawn at whatever size each shape
+    happened to want: a lightning bolt with the mass of a full stop next to a hairline
+    globe, some running edge to edge of the box and others floating in the middle. In a
+    row they read as a collection rather than a set.
+
+    These are stroked on a 24 grid at a single weight, with the ink kept inside roughly
+    3 to 21 so every glyph carries the same optical size. The stroke lives on the symbol,
+    so a new icon cannot quietly arrive at a different weight.
+  -->
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 11.2v5"/><path d="M12 7.9h.01"/></symbol>
+  <symbol id="i-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 3.4a8.6 8.6 0 0 0 0 17.2z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.8v2.1M12 19.1v2.1M2.8 12h2.1M19.1 12h2.1M5.5 5.5l1.5 1.5M17 17l1.5 1.5M18.5 5.5 17 7M7 17l-1.5 1.5"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.1A8.4 8.4 0 0 1 9.9 4a8.6 8.6 0 1 0 10.1 10.1z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M3.6 12h16.8"/><path d="M12 3.4c2.2 2.4 3.4 5.4 3.4 8.6s-1.2 6.2-3.4 8.6c-2.2-2.4-3.4-5.4-3.4-8.6S9.8 5.8 12 3.4z"/></symbol>
+  <symbol id="i-install" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v10.2"/><path d="M8.2 10.2 12 14l3.8-3.8"/><path d="M4.4 17.2v1.9a1.4 1.4 0 0 0 1.4 1.4h12.4a1.4 1.4 0 0 0 1.4-1.4v-1.9"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.4 13.6a3.6 3.6 0 0 0 5.1 0l2.6-2.6a3.6 3.6 0 1 0-5.1-5.1l-1 1"/><path d="M13.6 10.4a3.6 3.6 0 0 0-5.1 0l-2.6 2.6a3.6 3.6 0 1 0 5.1 5.1l1-1"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5.8 12h12.4"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.3" r="1.55" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.55" fill="currentColor" stroke="none"/><circle cx="12" cy="18.7" r="1.55" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m9 6 6 6-6 6"/>
+</symbol>
+<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.6 9.8 17.4 19 8.2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 5v14M5 12h14"/>
+</symbol>
+<symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4.5 12h15M12.5 5l7 7-7 7"/>
+</symbol>
+<symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2 5 6v5.4c0 4.3 2.9 8.2 7 9.4 4.1-1.2 7-5.1 7-9.4V6z"/><path d="M9.2 12.1 11.2 14l3.6-3.8"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.8" y="10.2" width="14.4" height="10.2" rx="2.6"/><path d="M8.3 10.2V7.4a3.7 3.7 0 0 1 7.4 0v2.8"/><path d="M12 14.2v2.3"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.9 3.2 5.6 13.3h5l-1.5 7.5 7.3-10.1h-5z"/></symbol>
+  <symbol id="i-unplug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5.4 5.4 18.6 18.6"/><path d="M9.6 10.5 7.9 12.2a3.7 3.7 0 0 0 5.2 5.2l1.7-1.7"/><path d="M14.4 13.5l1.7-1.7a3.7 3.7 0 0 0-5.2-5.2L9.2 8.3"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.4" y="5.2" width="15.2" height="10" rx="1.7"/><path d="M2.8 18.4h18.4"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7.2" y="2.9" width="9.6" height="18.2" rx="2.4"/><path d="M10.6 5.6h2.8"/></symbol>
+  <symbol id="i-tablet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.9" width="14" height="18.2" rx="2.4"/><path d="M11 18.4h2"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="3.1"/>
+  <path d="M19.2 14.4a1.6 1.6 0 0 0 .32 1.77l.06.06a1.9 1.9 0 1 1-2.69 2.69l-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-.97 1.47v.17a1.9 1.9 0 1 1-3.8 0v-.09a1.6 1.6 0 0 0-1.05-1.47 1.6 1.6 0 0 0-1.77.32l-.06.06A1.9 1.9 0 1 1 4.72 16.3l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.47-.97H3.5a1.9 1.9 0 1 1 0-3.8h.09a1.6 1.6 0 0 0 1.47-1.05 1.6 1.6 0 0 0-.32-1.77l-.06-.06A1.9 1.9 0 1 1 7.37 4.1l.06.06a1.6 1.6 0 0 0 1.77.32h.08a1.6 1.6 0 0 0 .97-1.47V2.9a1.9 1.9 0 1 1 3.8 0v.09a1.6 1.6 0 0 0 .97 1.47 1.6 1.6 0 0 0 1.77-.32l.06-.06a1.9 1.9 0 1 1 2.69 2.69l-.06.06a1.6 1.6 0 0 0-.32 1.77v.08a1.6 1.6 0 0 0 1.47.97h.17a1.9 1.9 0 1 1 0 3.8h-.09a1.6 1.6 0 0 0-1.47.97z"/>
+</symbol>
+<symbol id="i-devices" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.9" y="5.4" width="12.2" height="8.4" rx="1.6"/><path d="M2.9 16.6h9.4"/><rect x="15.6" y="10.6" width="5.5" height="10.2" rx="1.6"/></symbol>
+  <symbol id="i-room" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.4" r="3"/><path d="M3.4 19.4a5.6 5.6 0 0 1 11.2 0"/><path d="M16 6.1a2.6 2.6 0 0 1 0 5.1"/><path d="M17.1 13.5a4.6 4.6 0 0 1 3.5 4.4"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.1 9.1a13 13 0 0 1 17.8 0"/><path d="M6.3 12.4a8.4 8.4 0 0 1 11.4 0"/><path d="M9.4 15.7a3.9 3.9 0 0 1 5.2 0"/><circle cx="12" cy="18.9" r="1.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.4 3.4h6.8l4.4 4.4v12.8H6.4z"/><path d="M13.2 3.4v4.4h4.4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 6.4a1.6 1.6 0 0 1 1.6-1.6h4l2.2 2.4h8.2a1.6 1.6 0 0 1 1.6 1.6v8.8a1.6 1.6 0 0 1-1.6 1.6H4.8a1.6 1.6 0 0 1-1.6-1.6z"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 5.6a1.6 1.6 0 0 1 1.6-1.6h13.6a1.6 1.6 0 0 1 1.6 1.6v9.2a1.6 1.6 0 0 1-1.6 1.6H9.2l-4.4 3.6a.7.7 0 0 1-1.2-.6z"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h3.4L19.1 8.3a1.7 1.7 0 0 0 0-2.4l-1-1a1.7 1.7 0 0 0-2.4 0L4 16.6z"/><path d="M14.6 6.9l2.5 2.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 6.6h14.8"/><path d="M9.2 6.6V4.9a1.3 1.3 0 0 1 1.3-1.3h3a1.3 1.3 0 0 1 1.3 1.3v1.7"/><path d="M6.6 6.6l.9 12.1a1.6 1.6 0 0 0 1.6 1.5h5.8a1.6 1.6 0 0 0 1.6-1.5l.9-12.1"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6.6" y="6.6" width="10.8" height="10.8" rx="2.6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.4 5.6a1 1 0 0 1 1.53-.85l8.2 5.25a1 1 0 0 1 0 1.69l-8.2 5.25a1 1 0 0 1-1.53-.85z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7.4" y="5.4" width="3.5" height="13.2" rx="1.5" fill="currentColor"/><rect x="13.1" y="5.4" width="3.5" height="13.2" rx="1.5" fill="currentColor"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3.1c3.75 4.3 6.25 7.75 6.25 10.6a6.25 6.25 0 0 1-12.5 0C5.75 10.85 8.25 7.4 12 3.1z M12 11.3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" fill="currentColor" fill-rule="evenodd"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9.2" y="2.9" width="5.6" height="10.6" rx="2.8"/><path d="M5.9 11.3a6.1 6.1 0 0 0 12.2 0"/><path d="M12 17.4v3.7"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.4 18.1V5.4l8.7-1.8v12.2"/><circle cx="7.1" cy="18.1" r="2.3"/><circle cx="15.8" cy="15.8" r="2.3"/></symbol>
+</svg>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

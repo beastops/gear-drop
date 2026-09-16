@@ -1,0 +1,4455 @@
+/*
+ * Gear Drop — stylesheet.
+ *
+ * The visual language is AirDrop's, because AirDrop already solved this problem: devices
+ * are circles on a radar, you send by hitting one, and the ring around a circle is the
+ * progress. What Apple cannot do — and we can — is say *how* a device was found, so the
+ * one thing added on top is colour with a single meaning:
+ *
+ *     blue = this network   green = paired   orange = a room   (+ a shape, + a label)
+ *
+ * Everything else follows iOS: system colours, SF typography, vibrancy over a live
+ * background, 12–26 px radii, grouped inset lists, and spring motion that only ever runs
+ * when something actually changed.
+ */
+
+@property --p {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+:root {
+  /* iOS system colours, dark appearance */
+  /*
+   * Black ground, neutral greys. A blue cast reads as blue rather than as dark once it
+   * covers the screen, and the radar is meant to supply the only colour.
+   */
+  --bg: #000000;
+  --surface: #131313;
+  --veil: rgba(28, 28, 30, 0.72);
+  --veil-strong: rgba(24, 25, 29, 0.86);
+  /*
+   * The menu's surface, and it is a surface rather than a veil now.
+   *
+   * Kept in the same hue family as the translucent version it replaces, and light enough
+   * against the black ground to read as something laid on top without needing an edge drawn
+   * round it to say so. The shadow does the rest.
+   */
+  --veil-menu: #202126;
+  /* What a frosted surface becomes while it is in motion. */
+  --veil-solid: #1f1f22;
+
+  --line: rgba(255, 255, 255, 0.11);
+  --fill: rgba(120, 120, 128, 0.24);
+  --fill-2: rgba(120, 120, 128, 0.36);
+
+  /*
+   * Glass.
+   *
+   * A pane of glass reads as glass because of its edges, not its middle: a bright line
+   * where the light catches the top, a darker one underneath where it has thickness, and a
+   * faint wall all the way round. Those three, plus something blurred behind them, are the
+   * whole effect — which is why it survives being done in shadows rather than shaders.
+   */
+  /*
+   * Materials.
+   *
+   * Four thicknesses of glass, and every surface in the app picks one. They were all
+   * freehand before — a sheet at 40px, a toolbar at 32, a menu at 28, a chip at 20, each
+   * arrived at on its own and none of them agreeing. That reads as several unrelated
+   * translucent things rather than as one substance used at different depths, which is the
+   * difference between an interface that feels made and one that feels assembled.
+   *
+   * Saturation is part of the recipe, not a flourish: blurring alone leaves colour behind it
+   * looking washed and dead, and lifting saturation is what makes a blurred backdrop read as
+   * something seen *through* glass rather than something fogged over.
+   */
+  --mat-thin: blur(12px) saturate(170%);
+  --mat-regular: blur(24px) saturate(180%);
+  --mat-thick: blur(40px) saturate(180%);
+
+  --glass-top: rgba(255, 255, 255, 0.2); /* the lit edge — a sliver, not a stroke */
+  /*
+   * The edge of a pane, written once.
+   *
+   * Two insets and no ring: a blurred sliver along the top where the light lands, a little
+   * weight underneath where the glass is thick, nothing on the sides. The negative spread is
+   * what keeps it from becoming a stroke — the highlight starts at the edge and dissolves
+   * within a pixel instead of running all the way round at one brightness.
+   *
+   * The var()s inside resolve on whatever element uses this, so a theme that changes
+   * `--glass-top` changes every rim with it.
+   */
+  --rim:
+    inset 0 1px 1.5px -0.5px var(--glass-top),
+    inset 0 -1px 1.5px -0.5px var(--glass-under);
+  --glass-under: rgba(0, 0, 0, 0.22); /* thickness, underneath */
+  --glass-sheen: rgba(255, 255, 255, 0.3); /* what travels across on hover */
+  --glass-blur: blur(14px) saturate(180%);
+
+  /* The ground: one light from above, a vignette below, and grain over both. */
+  --bg-vignette: rgba(0, 0, 0, 0);
+  --bg-grain-blend: screen;
+  --bg-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.04'/%3E%3C/svg%3E");
+
+  --text: #ffffff;
+  /* Alphas chosen against this theme's own ground, not by eye: --muted clears 4.5:1 and
+     --faint clears 3:1, on the page and on a sheet. */
+  /*
+   * Both of these were set against the page, which is black, and then used on a sheet, which
+   * is not: the sheet's surface sits about eight per cent up from the ground, and that is
+   * enough to take a value that cleared 4.5 on one and leave it at 4.37 on the other. They
+   * are measured against the lighter of the two surfaces now.
+   */
+  --muted: rgba(235, 235, 245, 0.7);
+  /* Read by the one rule that tints with the label colour rather than painting in it. */
+  --muted-rgb: 235, 235, 245;
+  /*
+   * Raised from 0.42, which measured 3.5:1 against the black ground.
+   *
+   * It is used on the smallest text in the app - the storage line under the footer - and at
+   * twelve pixels the threshold is 4.5:1, not the 3:1 that large text gets. De-emphasised is a
+   * legitimate thing for text to be; below the contrast floor is not, and the difference
+   * between the two is a number rather than a judgement.
+   */
+  --faint: rgba(235, 235, 245, 0.6);
+
+  --accent: #0a84ff; /* systemBlue, dark */
+  /*
+   * The same blue, dark enough to put white text on.
+   *
+   * systemBlue at #0A84FF gives white 3.65:1, which is below the 4.5 that 15px text needs -
+   * Apple's own filled buttons measure the same and they are not a standard, they are a
+   * palette. Anywhere the accent is a *fill* with white on top - the primary button, an
+   * outgoing chat bubble - uses this instead. Anywhere it is a line, an icon or a glow keeps
+   * the bright one, because nothing is being read off it.
+   */
+  --accent-fill: #0b6ccc;
+  /* The same value for the shader, which cannot read a hex. */
+  --accent-fill-rgb: 11, 108, 204;
+  --accent-dim: #0060df;
+  --accent-rgb: 10, 132, 255;
+
+  /*
+   * The same colours again, for when they are the text rather than the thing.
+   *
+   * A system colour is chosen to look right as a fill, and it is measured as a fill: a solid
+   * block of it under white text. Used the other way round - as a label on the surface behind
+   * it - it is doing something it was never sized for, and at fifteen pixels these all landed
+   * between 3 and 4.4 against the 4.5 that ordinary text needs. Apple publishes lifted
+   * variants for this exact case; these are those, and they appear nowhere except on type.
+   *
+   * The fills keep the original colours, which is why there are two of each rather than one
+   * adjusted value: a dot and its caption are the same colour to the eye and different
+   * numbers to a contrast checker, and only one of them has to pass.
+   */
+  --ch-local-text: #5cabff;
+  --ch-paired-text: #46e06b;
+  --ch-room-text: #ffd426;
+  --accent-text: #5cabff;
+
+  --ch-local: #0a84ff;
+  --ch-local-rgb: 10, 132, 255;
+  --ch-paired: #30d158; /* systemGreen */
+  --ch-paired-rgb: 48, 209, 88;
+  --ch-room: #ff9f0a; /* systemOrange */
+  --ch-room-rgb: 255, 159, 10;
+
+  /* the radar's resting ring colour — read by the canvas, so it must be a triple */
+  --ring-rgb: 235, 235, 245;
+
+  --ok: #30d158;
+  --ok-rgb: 48, 209, 88;
+  --warn: #ff9f0a;
+  --warn-rgb: 255, 159, 10;
+  /* On a dark ground the fill colour is already legible as type: 6.4:1 on its own tint. */
+  --warn-text: #ff9f0a;
+  --danger: #ff453a; /* systemRed */
+  --danger-rgb: 255, 69, 58;
+
+  --r-sm: 10px;
+  --r: 12px;
+  --r-lg: 16px;
+  --r-xl: 26px;
+  --r-pill: 980px;
+  /* The toolbar's own height, including whatever the device reserves above it, so anything
+     that must sit clear of it can say so. */
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+  --inset-left: env(safe-area-inset-left, 0px);
+  --inset-right: env(safe-area-inset-right, 0px);
+  --toolbar-h: calc(50px + var(--inset-top));
+
+  --shadow-sheet: 0 24px 70px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.45);
+
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI',
+    Roboto, 'Helvetica Neue', system-ui, sans-serif;
+
+  /*
+   * Damped springs, solved and sampled into `linear()` rather than drawn by eye:
+   *
+   *     stiffness = (2PI / duration)^2     damping = 1 - bounce     mass = 1
+   *
+   *   smooth   0.35 / 0.00   no overshoot — sheets, layout, anything carrying text
+   *   snappy   0.30 / 0.15   0.6% — the reply to a press: switches, buttons, menus
+   *   bouncy   0.50 / 0.30   4.6% — arrival of something new, and only that
+   *
+   * Durations are settle times, not nominal: cutting at the nominal duration clips the tail
+   * that makes the motion read as physical.
+   */
+
+  /*
+   * Bezier stand-ins first. `linear()` arrived in Safari 17.2 and Firefox 112, and a custom
+   * property holding a value the browser cannot parse poisons every declaration that uses
+   * it - so without this an older phone would get no transitions at all rather than simpler
+   * ones. The @supports block below upgrades them where the real curves exist.
+   */
+  --spring-curve: cubic-bezier(0.2, 0.9, 0.24, 1.02);
+  --spring-snap-curve: cubic-bezier(0.32, 0.72, 0, 1);
+  --spring-soft-curve: cubic-bezier(0.25, 0.85, 0.3, 1);
+  --spring-ms: 787ms;
+  --spring-snap-ms: 409ms;
+  --spring-soft-ms: 499ms;
+
+  /* `--spring` is bouncy, `--spring-snap` is snappy, `--spring-soft` is smooth. */
+  --spring: var(--spring-ms) var(--spring-curve);
+  --spring-snap: var(--spring-snap-ms) var(--spring-snap-curve);
+  --spring-soft: var(--spring-soft-ms) var(--spring-soft-curve);
+
+  /*
+   * And the plain curves, for the properties a spring must never touch.
+   *
+   * Opacity is the case: there is nothing past fully opaque, so an overshoot there is not a
+   * bounce, it is a flicker. Colour is the same. These are the exact control points Core
+   * Animation uses for its named timing functions, and 250ms is what `UIView.animate` runs at
+   * when you do not tell it otherwise.
+   */
+  --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
+  --ease-out: cubic-bezier(0, 0, 0.58, 1);
+  --ease-in: cubic-bezier(0.42, 0, 1, 1);
+  --ease: var(--ease-in-out);
+
+  --t: 250ms var(--ease-in-out);
+  --t-fast: 150ms var(--ease-out);
+  --t-slow: 400ms var(--ease-in-out);
+}
+
+@supports (animation-timing-function: linear(0, 1)) {
+  :root {
+    --spring-curve: linear(0,0.0437,0.1495,0.2865,0.4321,0.5715,0.6956,0.7998,0.8827,0.9453,0.9898,1.0191,1.0363,1.0444,1.0459,1.0431,1.0379,1.0314,1.0247,1.0184,1.0129,1.0083,1.0047,1.002,1.0001,0.9989,0.9982,0.9979,0.9979,0.9981,0.9983,1);
+    --spring-snap-curve: linear(0,0.0326,0.1116,0.2148,0.3268,0.4376,0.5409,0.6333,0.7132,0.7806,0.836,0.8805,0.9156,0.9427,0.963,0.978,0.9887,0.9961,1.0009,1.0039,1.0055,1.0062,1.0062,1.0059,1.0053,1.0046,1.0039,1.0033,1.0026,1.0021,1.0016,1);
+    --spring-soft-curve: linear(0,0.0345,0.1147,0.2154,0.3214,0.4235,0.5172,0.6001,0.6718,0.7328,0.7838,0.826,0.8607,0.8889,0.9117,0.9301,0.9448,0.9565,0.9658,0.9732,0.979,0.9836,0.9872,0.9901,0.9923,0.994,0.9954,0.9964,0.9972,0.9978,0.9983,1);
+  }
+}
+
+:root {
+  color-scheme: dark;
+}
+
+/*
+ * The light theme is paper.
+ *
+ * The dark one is a room with an instrument in it, and everything in it - the pool of light
+ * at the beacon, the sweep, the grain, the vignette - is there because a dark screen has
+ * depth to put things into. Paper has none. Every one of those effects, moved across
+ * unchanged, turns into something it was not: the pool becomes a stain, the sweep becomes a
+ * smear, the grain becomes dirt, and the vignette becomes a photograph of a page rather than
+ * a page. They are gone here, and what is left is what was always carrying the idea - white,
+ * grey rings going out, and the accent used only where it means something.
+ */
+body.theme-light {
+  /*
+   * Off-white, so that white means something.
+   *
+   * Paper was the right idea and a single white was the wrong way to draw it: the page, the
+   * sheets, the menus and the bars were all #fff, so nothing had an edge and every surface
+   * had to be found by its shadow alone. A ground a few per cent down gives the white back
+   * its job - a sheet is now a piece of paper on a desk rather than a hole in one - and costs
+   * nothing in contrast, because type is measured against the surface it is printed on.
+   */
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --veil: rgba(249, 249, 251, 0.76);
+  --veil-strong: rgba(255, 255, 255, 0.9);
+  --veil-menu: #ffffff;
+  --veil-solid: #fbfbfd;
+
+  --line: rgba(60, 60, 67, 0.13);
+  --fill: rgba(120, 120, 128, 0.12);
+  --fill-2: rgba(120, 120, 128, 0.2);
+
+  /* On a light ground the lit edge has less to do and the shadow does more. */
+  --glass-top: rgba(255, 255, 255, 0.55);
+  --glass-under: rgba(0, 0, 0, 0.1);
+  --glass-sheen: rgba(255, 255, 255, 0.55);
+  --glass-blur: blur(16px) saturate(180%);
+
+  /* No vignette and no grain: both are ways of giving a dark screen depth, and both are
+     visible as dirt on a white one. */
+  --bg-vignette: transparent;
+  --bg-grain: none;
+
+  /*
+   * Not #000. Pure black on near-white is a combination no printed page has ever had: it
+   * buzzes at small sizes and reads as unfinished at large ones. This is still 15:1.
+   */
+  --text: #16181d;
+  --muted: rgba(60, 60, 67, 0.8);
+  --muted-rgb: 60, 60, 67;
+  /* Same measurement from the other side: 0.6 gave 3.45:1 on white. */
+  --faint: rgba(60, 60, 67, 0.78);
+
+  /*
+   * A shade down from systemBlue, because this one has to be readable.
+   *
+   * Apple's systemBlue is #007AFF and on white it measures 4.02:1 - which is the standard for
+   * large text and short of the 4.5 that ordinary text needs. It is used here both ways: as
+   * the label on a tinted button, and as white text on a filled one, and at that value both
+   * of those fail.
+   *
+   * Apple's own darker link blue, #0071E3, was enough while the page behind it was white. It
+   * is not any more: the ground is a few per cent down from white, which takes that blue to
+   * 4.31 against it - fine for the one heading drawn at this colour, short for anything at
+   * body size. One more step down puts it at 4.62 on the ground, 5.04 on a sheet, and 5.04
+   * for white sitting on top of it as a filled button.
+   *
+   * Nothing moves visibly. Beside the old colour you would struggle to tell them apart; the
+   * difference is entirely on the side of the numbers.
+   */
+  --accent: #006cdb;
+  /* Dark enough to carry white either way round: it measures 5.04. */
+  --accent-fill: var(--accent);
+  --accent-fill-rgb: var(--accent-rgb);
+  --accent-dim: #005bb8;
+  --accent-rgb: 0, 108, 219;
+
+  /*
+   * Darker than the first attempt, because these labels are not on white.
+   *
+   * The language list and the discovery choices both sit on a tinted panel - a grey wash in
+   * one, a blue one in the other - which lifts the background a tenth or so and takes what
+   * measured 4.70 on white down to 4.08. Measured against the surface the text is actually
+   * printed on rather than the one behind it.
+   */
+  --ch-local-text: #005bb8;
+  --ch-paired-text: #1b6e2f;
+  --ch-room-text: #8a3e00;
+  --accent-text: #005bb8;
+
+  --ch-local: #007aff;
+  --ch-local-rgb: 0, 122, 255;
+  --ch-paired: #34c759;
+  --ch-paired-rgb: 52, 199, 89;
+  --ch-room: #ff9500;
+  --ch-room-rgb: 255, 149, 0;
+
+  --ring-rgb: 60, 60, 67;
+
+  --ok: #34c759;
+  --ok-rgb: 52, 199, 89;
+  --warn: #ff9500;
+  --warn-rgb: 255, 149, 0;
+  /*
+   * And the same split red needs, for the same reason.
+   *
+   * systemOrange on its own fourteen-per-cent tint comes out near 2:1 in light mode - the tint
+   * lifts the ground to nearly white while the text stays bright, so there is very little
+   * between them. The fill keeps the orange; only the type is taken down, to 6.1:1.
+   */
+  --warn-text: #8a4a00;
+  /*
+   * Same again for red, and it needed more of a move.
+   *
+   * systemRed as a label on its own fourteen-per-cent tint came out near 3:1 - the tint lifts
+   * the background almost to white while the text stays light, so the two close on each other
+   * from both sides. The fill keeps the bright red; only the text is darkened, which is why
+   * there are two tokens here rather than one.
+   */
+  --danger: #cc0015;
+  --danger-rgb: 255, 59, 48;
+
+  /*
+   * Three layers rather than one, and slightly blue.
+   *
+   * A single wide shadow is how a drop-shadow looks; what a real object does is cast a hairline
+   * where it meets the surface, a short soft one just under it, and a wide faint one further
+   * out. The cast is cool because the light in this theme is daylight, and a neutral grey
+   * shadow under a white card is the giveaway that nothing is actually lit.
+   */
+  --shadow-sheet:
+    0 0 0 0.5px rgba(16, 24, 40, 0.05),
+    0 2px 6px rgba(16, 24, 40, 0.05),
+    0 26px 60px -18px rgba(16, 24, 40, 0.24);
+  --shadow-pop:
+    0 0 0 0.5px rgba(16, 24, 40, 0.04),
+    0 1px 3px rgba(16, 24, 40, 0.05),
+    0 14px 34px -12px rgba(16, 24, 40, 0.18);
+
+  color-scheme: light;
+}
+
+/*
+ * Where the light comes from.
+ *
+ * The dark theme has a pool at the beacon and a vignette at the edges, and both were dropped
+ * here for good reason: over a pale ground a translucent wash reads as a stain, and a darkened
+ * edge reads as a photograph of a page rather than a page. Neither objection applies to white
+ * on off-white. Nothing is tinted and nothing is darkened - the page is simply brightest where
+ * the rings come from and along the top where the toolbar sits, which is what paper near a
+ * window does, and is enough to stop a flat fill reading as a flat fill.
+ */
+body.theme-light {
+  background-image:
+    radial-gradient(160vw 100vh at 50% 106%, #ffffff 0%, rgba(255, 255, 255, 0) 64%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0) 38%);
+  background-size: cover, cover;
+  background-repeat: no-repeat, no-repeat;
+}
+
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /*
+   * Three layers: grain, one light, a vignette.
+   *
+   * Grain stops a wide dark gradient banding on an 8-bit panel, and gives the glass detail
+   * to refract. One light source, so every pane agrees about where it is coming from. The
+   * vignette gives the page depth to rest things on.
+   */
+  background-color: var(--bg);
+  background-image:
+    var(--bg-grain),
+        radial-gradient(120vw 100vh at 50% 46%, transparent 38%, var(--bg-vignette) 100%);
+  background-size: 180px 180px, cover;
+  background-repeat: repeat, no-repeat;
+  background-blend-mode: var(--bg-grain-blend), normal;
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  /* No 300 ms double-tap-to-zoom wait on anything in this interface. */
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
+  /* Every number in this interface changes in place — a rate, a percentage, a countdown —
+     so proportional digits would make the whole line twitch. */
+  font-variant-numeric: tabular-nums;
+}
+
+h1, h2, .empty p, .about-tag, .share-title {
+  text-wrap: balance;
+}
+
+#radar {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity var(--t-slow);
+}
+
+.sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+.muted { color: var(--muted); }
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
+}
+.small { font-size: 13px; }
+.strong { font-weight: 590; }
+
+::selection {
+  background: rgba(var(--accent-rgb), 0.3);
+}
+:focus-visible {
+  outline: 3px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ── toolbar ────────────────────────────────────────────────────────────── */
+
+/*
+ * A navigation bar, to the measurements of one.
+ *
+ * iOS gives a bar 44 points of height and fills it with 44-point items, so the tappable area
+ * of a bar button *is* the bar - there is no smaller control sitting inside a taller strip.
+ * The edge margins are the part that looks arbitrary and is not: text begins 16 points in,
+ * while the buttons come to within 8, because a 44-point target around a 22-point glyph
+ * already carries its own margin and stopping it at 16 as well would push the icons visibly
+ * inboard of the title. That is why the padding here is 8 and the wordmark adds its own 8.
+ */
+.topbar {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: calc(4px + var(--inset-top)) calc(8px + var(--inset-right))
+    4px calc(8px + var(--inset-left));
+  background: transparent;
+  border: 0;
+}
+
+/*
+ * No veil behind the toolbar or footer. A dark tint has nothing to darken on a black ground,
+ * so all it did was dim the radar in two bands. The rings are far below body-copy contrast,
+ * and the toolbar glyphs carry their own tint.
+ */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  /* The eight the buttons do not need, so the name still starts on the sixteen-point line. */
+  padding-inline-start: 8px;
+}
+.brand-mark {
+  /* The same size as the glyphs opposite it, so the two ends of the bar agree. */
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+  flex: none;
+}
+.brand-name {
+  font-weight: 590;
+  /* A navigation bar title is 17 points. */
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+/*
+ * Grouped by space, not by lines.
+ *
+ * Six identical circles in an even row give no clue which of them belong together, and the
+ * usual repair - a hairline between them - puts another drawn edge on a screen that has just
+ * had every drawn edge taken off it. Four pixels inside a group and sixteen between reads as
+ * two groups on its own: near things look related, far things do not, and nothing had to be
+ * drawn to say so.
+ */
+/*
+ * One spacing for the whole row.
+ *
+ * These were in two groups with a wider gap between them, which is a real pattern and the
+ * wrong one here: it needs enough items on each side to read as grouping rather than as a
+ * hole, and with four visible icons it just looked like one of the gaps had gone wrong. A
+ * 44-point button around a 22-point glyph already carries eleven points of clear space either
+ * side, so touching buttons sit twenty-two points apart - which is what iOS bar-item spacing
+ * measures anyway. Even, and no decision to notice.
+ */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* A hidden button must not leave a gap where it would have been. */
+.actions > [hidden] { display: none; }
+
+/*
+ * A toolbar button as an actual object.
+ *
+ * Built in layers rather than as one element with a filter on it, which is the part worth
+ * borrowing from published takes on this effect: the refraction, the tint and the highlight
+ * each get their own plane, so they can be tuned independently — and, more importantly, the
+ * icon sits above all three and never gets distorted. Bending the glyph along with the
+ * background is the thing that makes most attempts at this look like a smudge.
+ *
+ * The distortion is a plain `filter` on a layer that carries its own `backdrop-filter`. The
+ * backdrop is blurred into that plane first, and the plane is then displaced as an image —
+ * which is why this works in engines that will not accept an SVG filter in `backdrop-filter`
+ * directly.
+ */
+.icon-btn {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  /*
+   * Thirty-eight on a mouse, forty-four on a finger.
+   *
+   * These were thirty-four, and on a phone the toolbar took them down to thirty square with a
+   * single pixel between them - half the size a fingertip is reckoned to need, close enough
+   * together that missing one meant pressing its neighbour. A pointer that can be placed to
+   * the pixel does not need the extra room and looks better without it, so the size follows
+   * the input rather than the screen width: `pointer: coarse` is the browser saying a finger
+   * is being used, which is the thing that actually decides how big this has to be.
+   */
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  /* No 300ms wait for a double-tap that is not coming, and no grey flash over the glass. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  --gx: 30%;
+  --gy: 0%;
+  transition:
+    transform var(--spring-snap),
+    color var(--t-fast);
+}
+
+/* 1 — what is behind, blurred and bent. Always on: these are objects, not hover states. */
+.icon-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border-radius: inherit;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+/* 2 — the tint, and the light catching the top-left shoulder. */
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(34px 22px at var(--gx) var(--gy), rgba(255, 255, 255, var(--spec, 0.18)), transparent 74%),
+    var(--fill);
+  /*
+   * A lit edge and a dark one — not an outline.
+   *
+   * A stroke that runs all the way round at one brightness is a drawn border, and the eye
+   * reads it as ink on the screen rather than as an object catching light. Glass does not
+   * look like that: the top shoulder picks up whatever is above it, the underside goes dark
+   * where the pane is thick, and the sides all but disappear. Two offset, blurred insets and
+   * no ring at all is the whole difference between a shape with a line round it and a shape
+   * that looks lit.
+   */
+  box-shadow: var(--rim);
+  transition: background var(--t-fast);
+}
+
+.icon-btn:hover,
+.icon-btn:focus-visible {
+  color: var(--text);
+  --spec: 0.34;
+}
+
+@media (pointer: coarse) {
+  .icon-btn { width: 44px; height: 44px; }
+  /* Kept in step with the restated copy below, which is the one that actually applies. */
+  .seg .icon-btn { width: 44px; height: 44px; }
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+  transition: transform var(--spring-snap);
+}
+
+/*
+ * Pressing pushes the glyph into the glass rather than shrinking the whole control: the pane
+ * holds its size and the thing on it gives. Shrinking both reads as the button retreating
+ * from the finger.
+ */
+.icon-btn:active { transform: none; }
+.icon-btn:active svg { transform: scale(0.88); }
+
+/* The one that is on is a solid pane, not a hover. */
+.icon-btn.on,
+.icon-btn[aria-pressed='true'] {
+  color: #fff;
+}
+.icon-btn.on::after,
+.icon-btn[aria-pressed='true']::after {
+  background:
+    radial-gradient(34px 22px at var(--gx) var(--gy), rgba(255, 255, 255, 0.32), transparent 74%),
+    var(--accent);
+  box-shadow: var(--rim), 0 2px 8px -3px rgba(var(--accent-rgb), 0.55);
+}
+
+/* Chrome will displace the blurred plane; everywhere else keeps the blur and the highlight. */
+@supports (filter: url('#gd-wobble')) {
+  .icon-btn::before {
+    filter: url('#gd-wobble') saturate(125%) brightness(1.08);
+  }
+}
+
+/*
+ * Bare glyphs in the toolbar — no capsule, fill or edge, the way a navigation bar works.
+ * Glass belongs to things sitting over content; the toolbar is frame, and five lit panes
+ * gave the frame more presence than the page. Same size, hit area and focus ring.
+ */
+/*
+ * Bar items are 44 on every device, not only on the ones with fingers.
+ *
+ * The 38/44 split elsewhere is a reasonable trade - a pointer can be placed to the pixel and
+ * a tidier control looks better under one. A navigation bar is the exception: its items are
+ * the bar, and shrinking them on a desktop leaves the glyphs floating in a strip taller than
+ * they are with nothing establishing the line they sit on.
+ */
+header .icon-btn {
+  width: 44px;
+  height: 44px;
+
+  /*
+   * Neutral, not tinted.
+   *
+   * iOS tints its bar items because on a phone the tint is the only thing marking them as
+   * pressable, and a navigation bar there carries two or three of them. Five across the top of
+   * this page is a different picture: the accent is already doing real work below - the
+   * heading, the beacon, the channel the device was found on - and repeating it up here turned
+   * the frame into the loudest thing on the screen, competing with the content it frames.
+   *
+   * So the glyphs sit in the interface's own label grey and go to full strength under the
+   * pointer. That is the other half of how a toolbar reads: an icon in the text colour is part
+   * of the furniture until you reach for it. Colour is left to mean something.
+   */
+  background: none;
+  box-shadow: none;
+  /* No pane to clip to, and nothing to compose against. */
+  overflow: visible;
+  isolation: auto;
+  transition:
+    opacity 120ms ease-out,
+    color var(--t-fast);
+}
+
+/* The blurred plane and the tint both belonged to the pane that is no longer there. */
+header .icon-btn::before,
+header .icon-btn::after {
+  display: none;
+}
+
+/* Nav-bar glyphs are drawn a little larger than the ones inside a filled control. */
+header .icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+/*
+ * Pressed is dimmer, not smaller.
+ *
+ * A control that shrinks under the finger is a thing being pushed away from it. iOS does not
+ * do that anywhere; it drops the glyph to about a third and brings it back, fast enough that
+ * it reads as contact rather than as an animation. With no pane to shrink there is nothing
+ * for a scale to act on anyway - it would just make the icon jump.
+ */
+header .icon-btn:active {
+  opacity: 0.35;
+  transform: none;
+}
+header .icon-btn:active svg {
+  transform: none;
+}
+
+header .icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* iOS segmented control */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--fill);
+}
+.seg .icon-btn {
+  width: 30px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--muted);
+}
+/*
+ * Restated after the base rule, not before it.
+ *
+ * There is a `pointer: coarse` block further up that already asked for this, and it had no
+ * effect: it sits above the rule it was meant to override and they have the same specificity,
+ * so the later one won and the segments stayed twenty-six pixels tall on a phone. Overrides
+ * belong after the thing they override, which is easy to write and easy not to notice.
+ */
+@media (any-pointer: coarse) {
+  /*
+   * And thirty-six was still short.
+   *
+   * Once the ordering was fixed the segments went from twenty-six to thirty-six, which is
+   * better and is still under the forty-four every other target on a phone was measured
+   * against. A segmented control is shorter than a button on most platforms and it looked
+   * right, which is presumably why it was left there - but this one is three buttons wide with
+   * no gaps between them, so the eight missing pixels were not padding around a target, they
+   * were target. The control grows to forty-eight including its two pixels of padding, which
+   * is an ordinary row height on a phone, and the row it sits in already had the room.
+   */
+  .seg .icon-btn { width: 44px; height: 44px; }
+}
+
+.seg .icon-btn svg { width: 15px; height: 15px; }
+.seg .icon-btn:hover { background: transparent; }
+.seg .icon-btn[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+body.theme-light .seg .icon-btn[aria-pressed='true'] { background: #fff; }
+
+/*
+ * State, next to the name it is a fact about.
+ *
+ * This used to sit at the head of the button row, where a pill among five circles reads as a
+ * sixth control and invites a press that does nothing. Beside the wordmark it reads the way
+ * it is meant to - Gear Drop, ready - and the right-hand side is left to things that actually
+ * do something.
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Far enough from the mark that the dot is not read as part of the logo. */
+  margin-inline-start: 5px;
+  font-size: 13px;
+  padding: 4px 11px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  transition: background var(--t-fast);
+}
+.chip-live { color: var(--text); }
+.chip-live::before {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(var(--ok-rgb), 0.22);
+}
+.chip-quiet::before { background: var(--faint); }
+
+/* ── share mode banner ──────────────────────────────────────────────────── */
+
+.share-bar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px calc(clamp(10px, 3vw, 18px) + var(--inset-right)) 0
+    calc(clamp(10px, 3vw, 18px) + var(--inset-left));
+  padding: 10px 12px;
+  border-radius: var(--r-lg);
+  /* Solid: it animates in and out over the radar, like everything else that does. */
+  background: var(--veil-solid);
+  box-shadow: var(--shadow-pop);
+  animation: sheet-drop var(--spring-soft);
+}
+@keyframes sheet-drop {
+  from { opacity: 0; transform: translateY(-14px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.share-bar.leaving {
+  animation: sheet-lift 190ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+@keyframes sheet-lift {
+  to { opacity: 0; transform: translateY(-12px) scale(0.97); }
+}
+
+.share-thumb {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: var(--r-sm);
+  background: var(--fill) center/cover no-repeat;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  overflow: hidden;
+}
+.share-thumb svg { width: 20px; height: 20px; }
+
+.share-copy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 1px;
+}
+.share-title {
+  font-weight: 590;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-sub { font-size: 13px; color: var(--muted); }
+.share-actions { display: flex; gap: 8px; flex: none; }
+
+/* ── stage ──────────────────────────────────────────────────────────────── */
+
+#stage {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 0 calc(16px + var(--inset-right)) min(18vh, 150px) calc(16px + var(--inset-left));
+  min-height: 0;
+}
+
+.peers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  /* `safe center`: centred while the tiles fit, top-aligned once they do not. Plain `center`
+     splits the overflow across both ends, and the half above the scroll origin cannot be
+     reached - the first row of devices would be invisible with no way to get to it. */
+  align-content: safe center;
+  justify-content: center;
+  gap: 14px 6px;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding: 4px;
+}
+.peers::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Lists inside this app scroll with momentum and do not hand the gesture to the page. */
+.peers,
+.sheet-body,
+.file-list,
+.lang-list,
+.text-received {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* ── a device, the AirDrop way: a circle with a name under it ───────────── */
+
+.peer {
+  --p: 0;
+  --tone: var(--accent-rgb);
+  position: relative;
+  /* One fluid size from a 320 px phone to a 27 inch display, rather than a fixed width
+     with a phone override — the circles should grow with the room they are in. */
+  width: clamp(100px, 8vw, 132px);
+  padding: 10px 4px 8px;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: background var(--t-fast), transform var(--spring-snap);
+  animation: peer-in var(--spring) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+@keyframes peer-in {
+  from { opacity: 0; transform: scale(0.5); }
+  to { opacity: 1; transform: none; }
+}
+.peer.leaving {
+  animation: peer-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+@keyframes peer-out {
+  to { opacity: 0; transform: scale(0.82); }
+}
+
+.peer:hover { background: var(--fill); }
+.peer:hover .avatar { transform: scale(1.045); }
+.peer:active { transform: scale(0.95); }
+.peer:active .avatar { transform: scale(0.97); }
+
+/* In share mode a reachable device is a target, so it gets a halo in its own colour. */
+body.share-mode .peer.ready .avatar {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 0 0 5px rgba(var(--tone), 0.2),
+    0 10px 30px rgba(var(--tone), 0.34);
+}
+body.share-mode .peer.ready:hover .avatar {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 0 0 8px rgba(var(--tone), 0.26),
+    0 12px 36px rgba(var(--tone), 0.42);
+}
+
+.avatar {
+  position: relative;
+  width: clamp(68px, 5.6vw, 92px);
+  height: clamp(68px, 5.6vw, 92px);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  /* The colour animates, the specular does not — so `background-color` stays a separately
+     interpolable property and a device lighting up is a smooth transition, not a cut. */
+  background-color: var(--fill-2);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 58%);
+  color: var(--muted);
+  transition:
+    background-color var(--t),
+    color var(--t),
+    box-shadow var(--t),
+    transform var(--spring-snap);
+}
+.avatar svg.dev {
+  width: 44%;
+  height: 44%;
+  transition: color var(--t);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.16));
+}
+
+/* A reachable device is filled with its channel colour — AirDrop's own idea, except
+   AirDrop only ever has one colour to give. The glow underneath is what lets the radar
+   pick that colour up locally instead of the page being tinted as a whole. */
+.peer.ready .avatar {
+  background-color: rgb(var(--tone));
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 6px 20px rgba(var(--tone), 0.3);
+}
+body.theme-light .peer.ready .avatar {
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    0 6px 18px rgba(var(--tone), 0.36);
+}
+
+.peer.offline .avatar,
+.peer.connecting .avatar {
+  background-color: var(--fill-2);
+  color: var(--muted);
+  box-shadow: none;
+}
+
+/* progress ring, eased frame by frame in script */
+.avatar::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: conic-gradient(from -90deg, rgb(var(--tone)) calc(var(--p) * 360deg), var(--fill) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  opacity: 0;
+  transition: opacity var(--t);
+}
+.peer.busy .avatar::before { opacity: 1; }
+.peer.busy .pmeta {
+  color: rgb(var(--tone));
+  font-weight: 500;
+}
+/* Which way the bytes are going, without costing a line of script or a pixel of layout. */
+.peer.sending .pmeta::before { content: '↑ '; }
+.peer.receiving .pmeta::before { content: '↓ '; }
+
+.peer.connecting .avatar::before {
+  opacity: 1;
+  background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 300deg, transparent 360deg);
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin { to { rotate: 360deg; } }
+
+.peer.done .avatar { animation: land var(--spring); }
+@keyframes land {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+/* One ring leaving the device when a transfer lands. It runs once, and only then. */
+.peer.done .avatar::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid rgb(var(--tone));
+  animation: landed 700ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  pointer-events: none;
+}
+@keyframes landed {
+  from { transform: scale(1); opacity: 0.85; }
+  to { transform: scale(1.6); opacity: 0; }
+}
+
+/* channel pills: colour AND shape, so colour is never the only signal */
+.channels {
+  display: flex;
+  gap: 5px;
+  height: 6px;
+  align-items: center;
+  margin-top: -2px;
+}
+.channels i {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  animation: pill-in var(--spring) both;
+}
+.channels i.local { box-shadow: 0 0 8px rgba(var(--ch-local-rgb), 0.5); }
+.channels i.paired { box-shadow: 0 0 8px rgba(var(--ch-paired-rgb), 0.5); }
+.channels i.room { box-shadow: 0 0 8px rgba(var(--ch-room-rgb), 0.5); }
+@keyframes pill-in {
+  from { opacity: 0; transform: scaleX(0.2); }
+  to { opacity: 1; transform: none; }
+}
+.channels i.local { width: 18px; background: var(--ch-local); }
+.channels i.paired { width: 6px; background: var(--ch-paired); }
+.channels i.room { width: 10px; background: var(--ch-room); border-radius: 2px; }
+
+.pname {
+  font-weight: 500;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+  max-width: 92%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pmeta {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-height: 1.2em;
+}
+
+.peer.offline { cursor: default; opacity: 0.45; }
+.peer.offline:hover { background: transparent; }
+.peer.drop-target .avatar {
+  box-shadow: 0 0 0 6px rgba(var(--tone), 0.32);
+  transform: scale(1.06);
+}
+
+.badge-check {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: none;
+  place-items: center;
+  background: var(--ch-paired);
+  color: #fff;
+  border: 2.5px solid var(--bg);
+}
+.badge-check svg { width: 11px; height: 11px; }
+.peer.verified .badge-check { display: grid; }
+
+.peer-menu-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 0;
+  /*
+   * Solid, and this one matters more than it looks.
+   *
+   * This button is shown when its menu opens and faded back out when the menu closes, so it
+   * is a blurred disc whose opacity is animated to zero over a canvas that repaints - the
+   * exact shape of the artefact. It is also small and sits on a device tile, which makes it
+   * easy to mistake for something the menu left behind rather than a control of its own still
+   * on its way out.
+   */
+  background: var(--veil-solid);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast), color var(--t-fast), transform var(--t-fast);
+}
+.peer-menu-btn svg { width: 15px; height: 15px; }
+.peer:hover .peer-menu-btn,
+.peer-menu-btn:focus-visible,
+.peer.menu-open .peer-menu-btn { opacity: 1; }
+.peer-menu-btn:hover { color: var(--text); }
+.peer-menu-btn:active { transform: scale(0.88); }
+
+/* ── context menu, iOS style ────────────────────────────────────────────── */
+
+.menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 268px;
+  padding: 6px;
+  overflow: hidden;
+  /*
+   * A menu is not a sheet, and does not take a sheet's corner.
+   *
+   * Twenty-six pixels is right for a modal card - iOS rounds those to roughly the corner of
+   * the screen they slide out of. On a two-hundred-pixel menu the same radius eats the corners
+   * of the first and last rows and the thing reads as a bubble. A context menu on iOS is
+   * thirteen points, and the rows inside it are square to within a hair of the edge.
+   */
+  border-radius: 14px;
+
+  /*
+   * Opaque, with no backdrop-filter. Switching the filter off is itself the teardown — the
+   * compositor drops the backdrop root, and that is the frame where the stale sample shows.
+   * No timing avoids it while the property is used at all.
+   */
+  background: var(--veil-menu);
+  box-shadow: var(--shadow-pop);
+  will-change: opacity, transform;
+
+  /*
+   * And the damage is bounded.
+   *
+   * `contain` tells the engine that nothing inside this element affects the layout or the
+   * painting of anything outside it, so when the menu goes the region that has to be redrawn
+   * is exactly the menu's own box. Without it the invalidation is the engine's best guess.
+   */
+  contain: layout paint;
+
+  transform-origin: top right;
+  /* Snappy: this opened because you pressed something, and it is the reply. */
+  animation: menu-in var(--spring-snap) both;
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+.menu.closing {
+  animation: menu-out 130ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+@keyframes menu-out {
+  to { opacity: 0; transform: scale(0.94); }
+}
+
+.menu-head {
+  padding: 12px 14px 12px;
+  margin-bottom: 4px;
+  border-bottom: 0.5px solid var(--line);
+}
+.menu-title {
+  font-weight: 590;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+.menu-facts dt { color: var(--faint); }
+.menu-facts dd {
+  margin: 0;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* iOS puts the glyph on the trailing edge */
+/*
+ * A row, not a cell in a table.
+ *
+ * The icon leads, because that is what the eye lands on first and it is how the row is
+ * recognised before it is read. The hover is a rounded lozenge inset from the menu's own
+ * edge rather than a full-bleed band — the menu is a piece of glass with rows on it, and a
+ * highlight that runs into the corners makes it look like a list that was cropped.
+ */
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 12px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.menu-item svg {
+  width: 19px;
+  height: 19px;
+  color: var(--text);
+  opacity: 0.75;
+  flex: none;
+}
+/*
+ * A highlight under the pointer arrives at once, and only leaves slowly.
+ *
+ * These rows faded their background in over 150ms in both directions, which is the thing that
+ * makes running down a menu feel loose: the highlight is still catching up with the pointer
+ * when the pointer has already moved on, so for a moment two rows are half-lit and neither is
+ * the one you are on. A menu on any desktop platform highlights instantly - the highlight is
+ * not an animation, it is a readout of where you are.
+ *
+ * The fade is kept for the way out, where there is nothing to keep up with and a hard cut
+ * would flicker as the pointer crosses a gap.
+ */
+.menu-item,
+.choice,
+.lang-row {
+  transition: background 130ms var(--ease-out);
+}
+.menu-item:hover,
+.menu-item:active,
+.menu-item:focus-visible,
+.choice:hover,
+.choice:active,
+.lang-row:hover,
+.lang-row:active {
+  transition-duration: 0s;
+}
+
+.menu-item:hover { background: var(--fill); }
+.menu-item:active { background: var(--fill-2); }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger svg { color: var(--danger); }
+.menu-item[disabled] { opacity: 0.35; cursor: not-allowed; }
+
+/*
+ * A hairline between groups, inset so it stops short of the glass edge. A separator that
+ * runs the full width cuts the pane in two; one that stops short reads as a division inside
+ * a single object, which is what it is.
+ */
+.menu-sep {
+  height: 0;
+  margin: 5px 12px;
+  border-top: 0.5px solid var(--line);
+  background: none;
+}
+
+/*
+ * A disclosure, in the interface's own voice.
+ *
+ * The native marker is a filled triangle that belongs to no platform this app is trying to look
+ * like, so it is turned off and a chevron drawn in its place — the same one the discovery
+ * control wears, turned a quarter of the way round when the thing opens. Everything else about
+ * `<details>` is kept, because everything else about it is already right: it is a real
+ * disclosure to a screen reader, it opens on Enter and Space, and it needs no script at all.
+ */
+.disc-more { margin-top: 2px; }
+.disc-more > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 8px 2px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--t-fast);
+}
+.disc-more > summary::-webkit-details-marker { display: none; }
+.disc-more > summary::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  flex: none;
+  background: currentColor;
+  transition: rotate var(--t-fast);
+  /* The sprite cannot be reached from a pseudo-element, so the same glyph again as a mask. */
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.disc-more[open] > summary::before { rotate: 90deg; }
+.disc-more > summary:hover { color: var(--text); }
+/* A finger takes the whole row, not the words. */
+@media (any-pointer: coarse) {
+  .disc-more > summary { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .disc-more > summary::before { transition: none; }
+}
+
+/* ── chat ───────────────────────────────────────────────────────────────── */
+
+/*
+ * A conversation reads from the bottom.
+ *
+ * The sheet gives the log whatever height is left after the heading and the composer, and the
+ * log scrolls inside that rather than the sheet growing with the conversation - so the box
+ * does not change size as you talk, and the thing you are typing into never moves.
+ */
+.chat-sheet {
+  max-height: min(78dvh, 720px);
+}
+
+/*
+ * The security line.
+ *
+ * Deliberately quiet: caption-sized muted text between the title and the log, with no fill, no
+ * border and no colour of its own. It is reassurance rather than an alert - the kind of thing
+ * you glance at once and stop thinking about - and dressing it up would make the sheet look
+ * like it was warning you about something every time you opened it.
+ *
+ * The one part that does take colour is the word saying the safety words have not been checked,
+ * because that is the only state in this row worth interrupting for.
+ */
+.chat-secure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.3;
+  /* The lock is the sentence's icon, not a control: it must not invite a tap. */
+  cursor: default;
+}
+.chat-secure > svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  opacity: 0.75;
+}
+.chat-secure-warn {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--warn-rgb), 0.14);
+  color: var(--warn-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/*
+ * One scrollbar for everything that scrolls inside a sheet: nothing at rest, six pixels on
+ * hover. The gutter is reserved either way so text never shifts sideways. Touch gets none —
+ * there is no pointer to reveal it with.
+ */
+.chat-log,
+.chat-input,
+.file-list,
+.lang-list,
+.about-body,
+.text-received {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.chat-log:hover,
+.chat-input:hover,
+.file-list:hover,
+.lang-list:hover,
+.about-body:hover,
+.text-received:hover {
+  scrollbar-color: rgba(var(--ring-rgb), 0.45) transparent;
+}
+
+.chat-log::-webkit-scrollbar,
+.chat-input::-webkit-scrollbar,
+.file-list::-webkit-scrollbar,
+.lang-list::-webkit-scrollbar,
+.about-body::-webkit-scrollbar,
+.text-received::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.chat-log::-webkit-scrollbar-track,
+.chat-input::-webkit-scrollbar-track,
+.file-list::-webkit-scrollbar-track,
+.lang-list::-webkit-scrollbar-track,
+.about-body::-webkit-scrollbar-track,
+.text-received::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-log::-webkit-scrollbar-thumb,
+.chat-input::-webkit-scrollbar-thumb,
+.file-list::-webkit-scrollbar-thumb,
+.lang-list::-webkit-scrollbar-thumb,
+.about-body::-webkit-scrollbar-thumb,
+.text-received::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: var(--r-pill);
+  /* Inset by the border trick so the thumb floats rather than filling the gutter. */
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  /* Fades up rather than snapping on, so reaching for the list does not flash something at you. */
+  transition: background-color var(--t);
+}
+.chat-log:hover::-webkit-scrollbar-thumb,
+.chat-input:hover::-webkit-scrollbar-thumb,
+.file-list:hover::-webkit-scrollbar-thumb,
+.lang-list:hover::-webkit-scrollbar-thumb,
+.about-body:hover::-webkit-scrollbar-thumb,
+.text-received:hover::-webkit-scrollbar-thumb {
+  background: rgba(var(--ring-rgb), 0.45);
+}
+/* Nothing to point with: leave the mark at its resting weight rather than never showing it. */
+@media (any-pointer: coarse) {
+  .chat-log::-webkit-scrollbar,
+  .chat-input::-webkit-scrollbar,
+  .file-list::-webkit-scrollbar,
+  .lang-list::-webkit-scrollbar,
+  .about-body::-webkit-scrollbar,
+  .text-received::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+  .chat-log,
+  .chat-input,
+  .file-list,
+  .lang-list,
+  .about-body,
+  .text-received {
+    scrollbar-width: none;
+  }
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 140px;
+  max-height: min(48dvh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+  /* A conversation is read newest-last, so it starts at the bottom and stays there. */
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-log { scroll-behavior: auto; }
+}
+
+/* What the dust canvas below is positioned against. */
+.chat-sheet {
+  position: relative;
+}
+
+/*
+ * The canvas a destroyed conversation comes apart on.
+ *
+ * Over the whole sheet rather than over the log, so dust rising off the top message is not
+ * clipped by the scroller it came from. It never takes a pointer: the sheet stays usable
+ * while it plays, and it removes itself when it finishes.
+ */
+.dust-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/*
+ * Mine on the right, theirs on the left.
+ *
+ * The oldest convention in messaging and the only one that needs no legend. Colour carries it
+ * too - the accent for what this device said, the interface's own surface for what arrived -
+ * so it still reads for anyone who cannot use the side alone.
+ */
+.bubble {
+  position: relative;
+  max-width: 82%;
+  padding: 9px 13px;
+  border-radius: 17px;
+  font-size: 15px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: bubble-in var(--spring-snap) both;
+}
+.bubble.out {
+  align-self: flex-end;
+  background: var(--accent-fill);
+  color: #fff;
+  border-bottom-right-radius: 6px;
+}
+.bubble.in {
+  align-self: flex-start;
+  background: var(--fill-2);
+  color: var(--text);
+  border-bottom-left-radius: 6px;
+}
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/*
+ * A picture is the message, so the bubble gets out of its way.
+ *
+ * The padding drops to a hairline, which leaves the tint showing as a thin rim rather than a
+ * frame - enough to keep yours and theirs telling apart at a glance, not enough to look like
+ * the picture has been mounted on something.
+ */
+.bubble.photo {
+  padding: 3px;
+  max-width: 74%;
+  /* Text wrapping rules make no sense here and `pre-wrap` would add a phantom line. */
+  white-space: normal;
+  line-height: 0;
+}
+.photo-wrap {
+  display: block;
+  position: relative;
+  border-radius: 15px;
+  overflow: hidden;
+  /* Something to look at for the moment between the bubble appearing and the bytes arriving. */
+  background: rgba(var(--ring-rgb), 0.14);
+}
+.bubble-photo {
+  display: block;
+  max-width: 100%;
+  /* Tall pictures are capped so one of them cannot take the whole conversation with it. */
+  max-height: 320px;
+  width: auto;
+  height: auto;
+  border-radius: 15px;
+  /* An image that has not loaded should occupy nothing rather than a broken-image glyph. */
+  min-width: 0;
+}
+.bubble-photo:not([src]) {
+  width: 160px;
+  height: 120px;
+}
+.photo-gone {
+  display: block;
+  padding: 18px 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-align: center;
+}
+.bubble.out .photo-gone {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/*
+ * Audio in a bubble: a play control, the shape of the sound, and the time.
+ *
+ * Nothing draws a box. The bubble is the surface, and everything inside it is the bubble's own
+ * colour at different strengths — which is why the whole thing works unchanged on the tinted
+ * outgoing bubble and the grey incoming one without a single colour being named twice.
+ */
+/*
+ * A definite width, not a shrink-wrap.
+ *
+ * Both rows of bars are positioned, so the track measures zero and a bubble that sizes to its
+ * content collapses to the play button and the clock — with forty-four bars drawn over
+ * whatever happened to be next to it. Naming the width gives the flex row something to
+ * divide, and it is what makes a column of voice messages line up rather than each one
+ * being as wide as its own duration label.
+ */
+.bubble.audio {
+  width: 290px;
+  max-width: 78%;
+  white-space: normal;
+  line-height: normal;
+  /* Nothing inside may draw outside: the rounded corner is the edge of the message. */
+  overflow: hidden;
+}
+.audio-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.audio-wrap audio {
+  display: none;
+}
+
+/* A song keeps a title line; a voice message goes straight to the player. */
+.audio-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+.audio-head svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  opacity: 0.7;
+}
+.audio-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.audio-meta {
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline-start: 6px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Four columns, the same in every audio message.
+ *
+ * A grid rather than a flex row, because what matters here is that the clock in one bubble
+ * sits directly above the clock in the next. Flex sized each row to its own contents, so a
+ * recording — which carries a speed badge — pushed its waveform and its time left of the
+ * song above it, and a column of them never quite lined up.
+ */
+.audio-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/*
+ * The one filled shape in the bubble, because pressing it is the only thing to do here.
+ * Tinted from the bubble's own text colour, so it needs no colour of its own on either side.
+ */
+.audio-play {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: inherit;
+  background: rgba(var(--ring-rgb), 0.16);
+  transition: background-color var(--t-fast), transform var(--t-fast);
+}
+.bubble.out .audio-play {
+  background: rgba(255, 255, 255, 0.2);
+}
+.audio-play:hover {
+  background: rgba(var(--ring-rgb), 0.26);
+}
+.bubble.out .audio-play:hover {
+  background: rgba(255, 255, 255, 0.29);
+}
+.audio-play:active {
+  transform: scale(0.94);
+}
+.audio-play svg {
+  width: 17px;
+  height: 17px;
+}
+
+/*
+ * The waveform: the same bars twice, the top copy clipped to how far playback has got.
+ *
+ * `--played` is the only thing that moves — one custom property per tick, read by a
+ * `clip-path`, rather than forty-four style writes a frame. Both rows fill the track, so
+ * their geometry is identical and the boundary lands exactly between two bars.
+ */
+.audio-track {
+  --played: 0%;
+  position: relative;
+  /* `auto` would resolve against content, and the content is positioned: basis zero, grow
+     into whatever the row has left after the button and the clock. */
+  flex: 1 1 0;
+  min-width: 0;
+  height: 30px;
+  cursor: pointer;
+  touch-action: none; /* dragging the waveform is a scrub, not a scroll */
+  border-radius: 6px;
+  /* The count is fitted in script; this is the guarantee that nothing can spill regardless. */
+  overflow: hidden;
+}
+.audio-track:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.audio-track .bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.audio-track .bars > i {
+  /* No minimum: a bar that will not shrink is a row that overflows. */
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+/* The bars that have not been reached yet. */
+.audio-track .bars:not(.played) {
+  opacity: 0.3;
+}
+.audio-track .bars.played {
+  clip-path: inset(0 calc(100% - var(--played)) 0 0);
+}
+
+/* A track with no measured shape: a plain line with a filled head. */
+.audio-track.line {
+  height: 6px;
+  align-self: center;
+  border-radius: 3px;
+  background: rgba(var(--ring-rgb), 0.22);
+  overflow: hidden;
+}
+.bubble.out .audio-track.line {
+  background: rgba(255, 255, 255, 0.26);
+}
+.audio-track.line > i {
+  display: block;
+  width: var(--played);
+  height: 100%;
+  background: currentColor;
+  border-radius: 3px;
+}
+
+.audio-time {
+  font-size: 12px;
+  opacity: 0.66;
+  /* Fixed-width digits, so the number does not shuffle as it counts up. */
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: end;
+}
+
+.audio-rate {
+  border: 0;
+  padding: 2px 7px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: inherit;
+  background: rgba(var(--ring-rgb), 0.16);
+  font-variant-numeric: tabular-nums;
+  /*
+   * Fixed, not a minimum. "1.5×" is wider than "1×" and "2×", so a minimum let the badge
+   * grow by five pixels on the middle setting and take them from the waveform — the shape
+   * being watched shifted sideways at the moment of pressing. Sized to the longest label, all
+   * three sit in the same box.
+   */
+  width: 38px;
+  text-align: center;
+  box-sizing: border-box;
+}
+.bubble.out .audio-rate {
+  background: rgba(255, 255, 255, 0.2);
+}
+/* A song has no speed control, only the space where one would be. */
+.audio-rate.spacer {
+  visibility: hidden;
+  padding: 2px 0;
+}
+
+/* A container this browser will not decode: the player stays, greyed, and says so. */
+.audio-wrap.undecodable .audio-play,
+.audio-wrap.undecodable .audio-track {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.audio-wrap.undecodable .audio-time {
+  font-size: 11.5px;
+  opacity: 0.8;
+}
+
+@media (any-pointer: coarse) {
+  /* The whole row is the target on a phone, so the bars get the height to be hit. */
+  .audio-track {
+    height: 34px;
+  }
+  .audio-play {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+
+/*
+ * The composer while the microphone is live.
+ *
+ * Red, because this is the one state in the app where something is being captured, and the
+ * dot pulses because a still red dot reads as a status light rather than as "now".
+ */
+.chat-rec {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 8px 2px 0;
+  padding: 7px 10px;
+  border-radius: 12px;
+  background: rgba(var(--danger-rgb), 0.12);
+  color: var(--danger);
+  font-size: 13px;
+}
+.rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: rec-pulse 1.5s ease-in-out infinite;
+}
+.rec-time {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+}
+.chat-rec .ghost-btn {
+  padding: 3px 10px;
+  font-size: 12.5px;
+}
+.chat-composer.recording .chat-input {
+  /* Typing during a recording sends text, not the recording; the box saying nothing is
+     clearer than a box that looks ready for either. */
+  opacity: 0.45;
+}
+#btn-chat-mic[aria-pressed='true'] {
+  color: var(--danger);
+  background: rgba(var(--danger-rgb), 0.14);
+}
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rec-dot {
+    animation: none;
+  }
+}
+
+/* The time sits under the last bubble of a run, not on every one. */
+.bubble-time {
+  align-self: flex-end;
+  margin: -2px 4px 4px;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.bubble-time.in { align-self: flex-start; }
+
+/*
+ * The actions on a message appear when you reach for it.
+ *
+ * Copy is the one that matters - it is why the old dialog existed at all - and Open is there
+ * only when the message is nothing but a link. Neither is drawn until the pointer is on the
+ * bubble or the keyboard is, so a conversation is a conversation and not a wall of buttons.
+ */
+.bubble-tools {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.bubble.out .bubble-tools { right: calc(100% + 6px); }
+.bubble.in .bubble-tools { left: calc(100% + 6px); }
+.bubble:hover .bubble-tools,
+.bubble:focus-within .bubble-tools { opacity: 1; }
+@media (any-pointer: coarse) {
+  /* Nothing to hover with: the actions are simply there. */
+  .bubble-tools { opacity: 1; }
+}
+.bubble-tool {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.bubble-tool svg { width: 14px; height: 14px; }
+.bubble-tool:hover { background: var(--fill-2); color: var(--text); }
+@media (any-pointer: coarse) {
+  /* A finger needs the same forty-four here as everywhere else; 34 was a half-measure. */
+  .bubble-tool { width: 44px; height: 44px; }
+  .bubble-tool svg { width: 17px; height: 17px; }
+}
+
+.chat-note { margin: 4px 2px 0; }
+
+/*
+ * The pair of whole-sheet controls, top right.
+ *
+ * `.close-x` is absolutely positioned on its own, so the two are wrapped and the wrapper takes
+ * that position instead; each button inside goes back to being laid out normally.
+ */
+.chat-head-tools {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  gap: 6px;
+  z-index: 1;
+}
+.chat-head-tools .close-x {
+  position: static;
+  top: auto;
+  right: auto;
+}
+#btn-chat-clear:hover {
+  background: rgba(var(--danger-rgb), 0.18);
+  color: var(--danger);
+}
+
+/* Attachments share the send button's size, so the composer reads as one row of controls. */
+.chat-attach {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), transform var(--spring-snap);
+}
+.chat-attach svg { width: 20px; height: 20px; }
+.chat-attach:hover { background: var(--fill-2); color: var(--text); }
+.chat-attach:active { transform: scale(0.92); }
+.chat-attach:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* The composer: a field that grows a little, and one button that does not. */
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 132px;
+  padding: 11px 14px;
+  border-radius: var(--r-lg);
+  border: 0;
+  background: var(--fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.35;
+  resize: none;
+  overflow-y: auto;
+}
+.chat-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+#btn-chat-send {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+}
+#btn-chat-send svg { width: 19px; height: 19px; }
+#btn-chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/*
+ * The one row in Settings that is not a preference.
+ *
+ * Set apart with a rule above it and a tint behind, because everything else in that sheet can
+ * be changed back and this cannot. The button carries the colour rather than the whole row:
+ * a red panel reads as an error the app is reporting, and this is not an error, it is an
+ * action waiting to be chosen.
+ */
+/*
+ * A device that still owes an erase.
+ *
+ * The subtitle in that row is normally a quiet grey status; this one is a promise that has not
+ * been kept yet, so it carries the warning colour until it has been. It is not an error - the
+ * app is doing exactly what it said it would - which is why it is the amber and not the red.
+ */
+.device-row .who span.owed {
+  color: var(--warn-text);
+  font-weight: 500;
+}
+
+.danger-row {
+  margin-top: 6px;
+  border-top: 0.5px solid var(--line);
+  padding-top: 14px;
+}
+.danger-btn {
+  padding: 9px 14px;
+  border: 0;
+  border-radius: var(--r);
+  background: rgba(var(--danger-rgb), 0.14);
+  color: var(--danger);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--spring-snap);
+}
+.danger-btn:hover { background: rgba(var(--danger-rgb), 0.22); }
+.danger-btn:active { transform: scale(0.96); }
+@media (any-pointer: coarse) {
+  .danger-btn { min-height: 44px; }
+}
+
+/* ── empty state ────────────────────────────────────────────────────────── */
+
+/*
+ * Wide enough for the headline to stay on one line.
+ *
+ * At its largest the line measures 602 pixels and the box was capped at 480, so it broke in
+ * two every time there was room for it not to. Thirty rem is a sensible measure for a
+ * paragraph and the wrong one for a single short sentence set large - and the paragraph
+ * underneath keeps its own narrower limit, so widening this does not turn the body copy into
+ * one long line.
+ *
+ * The cap stays rather than becoming `nowrap`: on a phone the sentence genuinely does not fit
+ * and has to wrap. `balance` is for that case - when it does break, the two lines come out
+ * near enough the same length instead of leaving one word stranded.
+ */
+.empty {
+  text-align: center;
+  max-width: 42rem;
+  text-wrap: balance;
+  /*
+   * Smooth. This is the largest piece of type on the screen, and the rule the presets were
+   * chosen by applies to it more than to anything else: for as long as an overshoot lasts,
+   * the words are in the wrong place and you are reading them anyway.
+   */
+  animation: peer-in var(--spring-soft) both;
+}
+.empty h1 {
+  font-size: clamp(21px, 3vw, 27px);
+  font-weight: 700;
+  margin: 0 0 8px;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+.empty p { color: var(--muted); margin: 0 auto 20px; font-size: 15px; max-width: 28rem; }
+.empty-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/*
+ * On this network, the resting state is two lines and a radar.
+ *
+ * There is nothing to decide and nothing to do — the other device only has to be opened —
+ * so the screen says that and stops. Buttons made the ordinary case look like a problem to
+ * solve, and a "looking for devices" label was a caption on something the sweep already
+ * shows. What is left is a sentence telling you the one thing that helps, in the accent
+ * colour so it reads as the app talking rather than as a warning.
+ */
+.empty[data-mode='local'] .empty-actions,
+.empty[data-mode='local'] .seeking {
+  display: none;
+}
+.empty[data-mode='local'] h1 {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: clamp(19px, 2.4vw, 24px);
+  letter-spacing: -0.02em;
+}
+.empty[data-mode='local'] > p:not(.seeking) {
+  margin-block-end: 0;
+  font-size: 14px;
+}
+
+/* ── "still looking" ──────────────────────────────────────────────────────
+   A live state, not a label. The dot keeps time with the radar behind it so the
+   two read as one thing that is still running. */
+.seeking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto 18px;
+  padding: 6px 13px 6px 11px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 510;
+}
+.seeking i {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: seek-pulse 1.6s var(--ease) infinite;
+}
+.seeking[data-mode='off'] {
+  background: rgba(var(--muted-rgb, 142, 142, 147), 0.14);
+  color: var(--muted);
+}
+.seeking[data-mode='off'] i { animation: none; opacity: 0.5; }
+@keyframes seek-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seeking i { animation: none; opacity: 0.8; }
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  margin: 0;
+  opacity: 0.85;
+}
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+
+/*
+ * Buttons, as pieces of glass.
+ *
+ * The reference implementations of this look warp the background with an SVG displacement
+ * map, and they are genuinely beautiful. They are also the wrong tool here: `backdrop-filter`
+ * does not accept an SVG filter reference in Chrome or Safari, so those demos apply the
+ * filter to a static layer — and every one of our buttons floats over a radar that repaints
+ * on every frame. The technique that survives that is the cheap half of it: blur what is
+ * behind, then draw the edges. Edges are what make glass legible anyway.
+ */
+.cta {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 20px;
+  border-radius: var(--r-pill);
+  border: 0;
+  background: var(--accent-fill);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  /*
+   * Base, edge and rim are three different things, and a single even outline collapses them
+   * into one. The bend belongs to the filter; this is the rim — bright on the shoulder the
+   * light falls on, dark underneath where the pane shows its thickness, and a faint wall all
+   * the way round to close the shape. Offsetting the two highlights in opposite directions is
+   * what gives it a lit side instead of a uniform ring.
+   */
+  box-shadow:
+    inset 0 1px 1.5px -0.5px var(--glass-top),
+    inset 0 -1px 1.5px -0.5px var(--glass-under),
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 8px 20px -8px rgba(var(--accent-rgb), 0.55);
+  transition:
+    background var(--t-fast),
+    transform var(--spring-snap),
+    box-shadow var(--t-fast),
+    opacity var(--t-fast);
+}
+/* The lit face: brightest along the top, gone by the middle. */
+.cta::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.26),
+    rgba(255, 255, 255, 0.05) 44%,
+    transparent 62%
+  );
+}
+/* A glint that crosses the face on hover — the one part that moves. */
+.cta::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset-block: -40%;
+  inline-size: 34%;
+  inset-inline-start: -50%;
+  background: linear-gradient(100deg, transparent, var(--glass-sheen), transparent);
+  rotate: 8deg;
+  transition: translate 640ms var(--ease);
+}
+.cta:hover::after { translate: 400% 0; }
+.cta svg { width: 17px; height: 17px; }
+.cta:hover { background: var(--accent-dim); }
+/* Pressed: it sinks, and the lit edge goes with it. */
+.cta:active {
+  transform: scale(0.96);
+  box-shadow:
+    inset 0 1px 1.5px -0.5px rgba(255, 255, 255, 0.12),
+    inset 0 2px 6px rgba(0, 0, 0, 0.2),
+    0 1px 1px rgba(0, 0, 0, 0.16);
+}
+.cta:disabled { opacity: 0.4; cursor: not-allowed; }
+.cta:disabled::after { display: none; }
+.cta.wide { width: 100%; }
+
+/* iOS "tinted" button: the accent as text on a soft fill — and clear glass, not frosted. */
+.ghost-btn {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 18px;
+  border-radius: var(--r-pill);
+  border: 0;
+  background: var(--fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 1.5px -0.5px var(--glass-top),
+    inset 0 -1px 1.5px -0.5px var(--glass-under),
+    0 1px 2px rgba(0, 0, 0, 0.16);
+  transition:
+    background var(--t-fast),
+    transform var(--spring-snap),
+    box-shadow var(--t-fast);
+}
+.ghost-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 58%);
+}
+.ghost-btn::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset-block: -40%;
+  inline-size: 34%;
+  inset-inline-start: -50%;
+  background: linear-gradient(100deg, transparent, var(--glass-sheen), transparent);
+  rotate: 8deg;
+  opacity: 0.6;
+  transition: translate 640ms var(--ease);
+}
+.ghost-btn:hover::after { translate: 400% 0; }
+.ghost-btn svg { width: 17px; height: 17px; }
+.ghost-btn:hover { background: var(--fill-2); }
+.ghost-btn:active {
+  transform: scale(0.96);
+  box-shadow:
+    inset 0 1px 1.5px -0.5px rgba(255, 255, 255, 0.08),
+    inset 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+
+/*
+ * The blur goes on last, and only where it is affordable.
+ *
+ * A translucent pill over a repainting canvas is the expensive case, so it is opt-in behind
+ * a support query and left off entirely when the machine has asked for less motion — a
+ * setting that usually means "this device is struggling" as often as it means "this makes me
+ * unwell".
+ */
+@supports (backdrop-filter: blur(1px)) {
+  .cta {
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+  }
+  /*
+   * Eighty-six per cent of a blue is still a blue over black. Over white it is not.
+   *
+   * The translucency is there so the blurred backdrop reads through the button, which works
+   * on the dark ground the stage has. Inside a sheet in the light theme the same button is
+   * 86% blue over near-white, which lifts it far enough that white text on it measures 3.76
+   * - a primary action failing contrast. On a light surface it is simply solid.
+   */
+  .cta { background: color-mix(in oklab, var(--accent-fill) 86%, transparent); }
+  .cta:hover { background: color-mix(in oklab, var(--accent-dim) 90%, transparent); }
+  body.theme-light .cta { background: var(--accent-fill); }
+  body.theme-light .cta:hover { background: var(--accent-dim); }
+}
+
+/*
+ * Real refraction, where the engine will do it.
+ *
+ * Chrome resolves an SVG filter in `backdrop-filter` and genuinely bends what is behind the
+ * element. Nothing else does yet, so this sits behind a support query and the blurred glass
+ * above remains the answer everywhere else.
+ *
+ * Worth knowing what it can and cannot do: refraction needs something behind it to refract.
+ * Over a photograph it is spectacular; over this app's near-black ground it is almost
+ * invisible, and shows up only where the button crosses a QR code, a device tile, or a
+ * bright ring of the radar. That is why it is paired with a highlight rather than relied on.
+ */
+/*
+ * The lens goes on the primary action and nothing else.
+ *
+ * Apple's guidance on adopting this material is blunt about it: use it sparingly, limit it
+ * to the most important functional elements, and do not layer it on top of itself. The
+ * point of the material is to draw attention to the content underneath — spread across
+ * every button, chip and menu row it stops pointing at anything and becomes the content.
+ *
+ * So: one refracting element per screen, the thing you actually want pressed. Everything
+ * else is an ordinary tinted control, which is also what keeps this cheap.
+ */
+@supports (backdrop-filter: url('#gd-lens')) {
+  .cta {
+    backdrop-filter: url('#gd-lens');
+  }
+}
+
+/*
+ * The highlight that follows your pointer.
+ *
+ * On a dark interface this is the cue that actually says "glass" — a wet-looking specular
+ * that slides across the surface as you move over it, the way a highlight tracks across a
+ * curved object when you move your head. Refraction alone, with a black background to bend,
+ * says nothing at all.
+ *
+ * `--gx`/`--gy` are written by the pointer handler in main.js and default to the top-left
+ * shoulder, which is where a light would sit if nobody were pointing at anything.
+ */
+.cta,
+.ghost-btn {
+  --gx: 30%;
+  --gy: 0%;
+}
+.cta::before,
+.ghost-btn::before {
+  background:
+    radial-gradient(
+      120px 70px at var(--gx) var(--gy),
+      rgba(255, 255, 255, var(--glass-spec, 0.3)),
+      transparent 70%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04) 44%, transparent 62%);
+  transition: background var(--t-fast) linear;
+}
+.ghost-btn::before {
+  --glass-spec: 0.18;
+}
+@media (hover: none) {
+  /*
+   * A finger has no hover, so the highlight is placed at the moment of contact instead and
+   * must arrive immediately — a transition here would animate it in from wherever the last
+   * tap happened to be, which reads as a smear rather than a press.
+   */
+  .cta::before,
+  .ghost-btn::before,
+  .icon-btn::before { transition: opacity var(--t-fast); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta::after,
+  .ghost-btn::after { display: none; }
+}
+.ghost-btn.danger { color: var(--danger); background: rgba(var(--danger-rgb), 0.14); }
+.ghost-btn.danger:hover { background: rgba(var(--danger-rgb), 0.22); }
+
+/* ── the beacon: you, at the centre of the radar ────────────────────────── */
+
+footer {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 10px calc(clamp(12px, 3vw, 20px) + var(--inset-right))
+    calc(20px + var(--inset-bottom)) calc(clamp(12px, 3vw, 20px) + var(--inset-left));
+  background: transparent;
+  font-size: 14px;
+}
+
+.beacon {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent);
+  transition: color var(--t-slow);
+}
+.beacon svg {
+  width: 34px;
+  height: 34px;
+  filter: drop-shadow(0 0 14px rgba(var(--accent-rgb), 0.45));
+  transition: filter var(--t-slow);
+}
+body.share-mode .beacon svg { filter: drop-shadow(0 0 18px rgba(var(--ch-room-rgb), 0.55)); }
+
+/*
+ * On paper the beacon is an object, not a light.
+ *
+ * In the dark theme this sits in the pool the radar draws around it, and the glow on the mark
+ * is that pool reaching the glyph. There is no pool here, and a wide soft glow over white is
+ * just a blurred blue smudge — so instead the beacon is a small white disc with a hairline and
+ * a tinted shadow under it. The rings then have something to come out of, which is the one
+ * thing the light theme was missing at the centre of its own picture.
+ */
+body.theme-light .beacon {
+  background: var(--surface);
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 1px 2px rgba(16, 24, 40, 0.06),
+    0 10px 22px -10px rgba(var(--accent-rgb), 0.45);
+}
+body.theme-light .beacon svg {
+  filter: drop-shadow(0 1px 1px rgba(var(--accent-rgb), 0.3));
+}
+body.theme-light.share-mode .beacon svg {
+  filter: drop-shadow(0 1px 1px rgba(var(--ch-room-rgb), 0.45));
+}
+
+/* One slow breath, and only while the relay is reachable — it is a status light, not an
+   ornament, so a disconnected app stops breathing. */
+.beacon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  opacity: 0;
+}
+body.link-live .beacon::after { animation: beacon 2.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite; }
+@keyframes beacon {
+  0% { transform: scale(0.82); opacity: 0.45; }
+  70% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+body.share-mode .beacon { color: var(--ch-room); }
+
+.identity { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.name-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-weight: 590;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-pill);
+  /* A 12 px pencil is not a target. The whole chip is, and it clears 44 px on touch. */
+  padding: 5px 11px;
+  min-height: 32px;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--spring-snap);
+}
+/* `any-pointer` rather than `pointer`: a laptop with a touchscreen reports a fine primary
+   pointer but can still be poked, and a target either is reachable by a finger or is not. */
+@media (any-pointer: coarse) {
+  .name-chip { min-height: 44px; }
+
+  /*
+   * The close button on every sheet was thirty pixels square.
+   *
+   * It is the control people reach for most and the one they reach for in a hurry, and it sat
+   * at two-thirds of the size a fingertip is reckoned to need. The circle itself stays thirty
+   * - it is a quiet control and should look like one - and an invisible pad around it brings
+   * what you can actually hit up to forty-four. That separation, a small mark inside a large
+   * target, is how the platform does it too.
+   */
+  .close-x::after,
+  .about-close::after {
+    content: '';
+    position: absolute;
+    inset: -7px;
+  }
+  .about-close::after { inset: -5px; }
+
+  /* The compact button beside the pairing code is still a button. */
+  .code-meta .ghost-btn { min-height: 44px; }
+
+  /*
+   * And a row in a menu, which came out at forty-one.
+   *
+   * Twelve pixels of padding around a fifteen-pixel line is the right *look* for a menu row
+   * and lands three pixels short of the floor. Three pixels is not much until it is the
+   * difference between the row you meant and the one under it, and a menu is a list of
+   * adjacent targets - the case where a near miss does something rather than nothing.
+   */
+  .menu-item { min-height: 44px; }
+  /*
+   * And so does the control next to it.
+   *
+   * This one changes how the device can be found, which is the most consequential switch on
+   * the screen, and it was twenty-seven pixels tall on a phone. It sits beside the rename chip
+   * that was already given a floor here; the two are the same kind of thing and only one of
+   * them had been measured.
+   */
+  .ch-chip.pointer { min-height: 44px; }
+}
+.name-chip:hover { background: var(--fill); }
+.name-chip:active { transform: scale(0.96); }
+.name-chip.editing { background: var(--fill); }
+.name-chip.editing .pen { opacity: 0; }
+
+.name-chip input {
+  font: inherit;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  /* Sized to the name so the footer does not jump when editing starts. */
+  width: var(--name-w, 10ch);
+  min-width: 4ch;
+  max-width: 46vw;
+  outline: none;
+  padding: 0;
+}
+.pen {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--faint);
+  transition: opacity var(--t-fast), color var(--t-fast);
+}
+.name-chip:hover .pen { color: var(--muted); }
+
+.discovery {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--muted);
+}
+.ch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: var(--r-pill);
+  border: 0;
+  background: rgba(var(--c), 0.16);
+  /* The tint stays the channel's own colour; only the label is lifted to a readable one. */
+  color: var(--c-text, rgb(var(--c)));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+  transition: background var(--t-fast), transform var(--spring-snap);
+  animation: peer-in var(--spring) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+.ch-chip.pointer { cursor: pointer; }
+.ch-chip.pointer:hover { background: rgba(var(--c), 0.26); }
+.ch-chip.pointer:active { transform: scale(0.94); }
+/*
+ * The chevron, and only on the control that opens something.
+ *
+ * Sized and dimmed so it sits behind the words rather than competing with them: it is not
+ * information, it is a promise that there is more behind this.
+ */
+.ch-chip .chev {
+  width: 14px;
+  height: 14px;
+  margin-inline-start: -2px;
+  margin-inline-end: -3px;
+  opacity: 0.55;
+  flex: none;
+}
+
+.ch-chip::before {
+  content: '';
+  width: 13px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgb(var(--c));
+  flex: none;
+}
+.ch-chip.ch-paired::before { width: 4px; border-radius: 50%; }
+.ch-chip.ch-room::before { width: 7px; border-radius: 1.5px; }
+.ch-local { --c: var(--ch-local-rgb); --c-text: var(--ch-local-text); }
+.ch-paired { --c: var(--ch-paired-rgb); --c-text: var(--ch-paired-text); }
+.ch-room { --c: var(--ch-room-rgb); --c-text: var(--ch-room-text); }
+
+/* A channel that is switched off still says so, in grey rather than in its colour. */
+.ch-chip.off {
+  background: var(--fill);
+  color: var(--muted);
+}
+.ch-chip.off::before { background: var(--faint); }
+
+/* ── sheets ─────────────────────────────────────────────────────────────── */
+
+/*
+ * The dialog is a frame, not a scroller.
+ *
+ * It used to carry `max-height` with the UA's `overflow: auto`, which meant that for the
+ * first two frames after opening — while the sheet inside was still settling — the content
+ * was ~10 px taller than the frame and the browser drew a full 15 px scrollbar down the
+ * right edge, then removed it. A bar flashing in and out on every dialog. Only the sheet
+ * body scrolls now, and it is capped, so the frame is never overflowed and that scrollbar
+ * can never appear.
+ */
+dialog.sheet {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  /*
+   * A floor as well as a ceiling. A `<dialog>` shrink-wraps, so with only a `max-width` a
+   * sheet holding one short line collapsed to 259px — nothing about a message being short
+   * should change the size of the window it arrives in.
+   *
+   * `min-width`, not `width`: a fixed width pins every sheet to 440 and the two-column
+   * pairing sheet, which needs the full 600, overflows its own body.
+   */
+  min-width: min(440px, calc(100vw - 24px));
+  max-width: min(600px, calc(100vw - 24px));
+  overflow: visible;
+  color: var(--text);
+
+  /*
+   * Enter and exit share one transition, so closing animates rather than cuts. The fade runs
+   * as long as the movement — a panel that is transparent half way through its own travel
+   * reads as simply disappearing.
+   */
+  opacity: 0;
+  translate: 0 22px;
+  scale: 0.9;
+  /*
+   * No `will-change` — an element that will-changes opacity becomes a backdrop root, and a
+   * backdrop root is where a descendant's `backdrop-filter` stops looking. With it, the
+   * sheet body blurred the dialog's own empty box and the page read straight through.
+   */
+  transition:
+    opacity var(--spring-soft-ms) var(--ease-out),
+    translate var(--spring-soft),
+    scale var(--spring-soft),
+    overlay var(--spring-soft-ms) allow-discrete,
+    display var(--spring-soft-ms) allow-discrete;
+}
+dialog.sheet[open] {
+  opacity: 1;
+  translate: none;
+  scale: 1;
+}
+@starting-style {
+  dialog.sheet[open] {
+    opacity: 0;
+    translate: 0 16px;
+    scale: 0.97;
+  }
+}
+
+/*
+ * The scrim dims, and does not blur.
+ *
+ * This is the biggest backdrop-filter in the app - it covers the whole window - and it fades
+ * in and out on every sheet, which is the worst case for leaving a stale sample behind: a
+ * full-screen one. What it bought was three pixels of blur underneath a 45% black wash, which
+ * is close to nothing you could point at. The wash does the work on its own.
+ */
+dialog.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition:
+    opacity 220ms var(--ease),
+    overlay 220ms allow-discrete,
+    display 220ms allow-discrete;
+}
+/* The backdrop clears as the sheet is pulled away, so the gesture feels like it is moving
+   the whole modal state and not just the panel. */
+dialog.sheet[open]::backdrop { opacity: calc(1 - var(--drag, 0) * 0.85); }
+
+/* While a finger is on it, nothing eases: the sheet is the finger. */
+dialog.dragging,
+dialog.dragging::backdrop {
+  transition: none !important;
+}
+
+/*
+ * A blurred surface that moves has to re-sample and re-blur its backdrop on every frame,
+ * and blur(40px) over a full-screen backdrop is the most expensive thing here. While the
+ * sheet is actually travelling it drops to a solid material instead. The veil is 0.86
+ * opaque to begin with, so at a glance — and it is only ever glanced at while moving — the
+ * two are the same surface.
+ */
+dialog.dragging .sheet-body,
+dialog.dragging .about-body,
+/*
+ * And on the way out, for the reason above and one more.
+ *
+ * A sheet that is closing is still in the overlay - `allow-discrete` keeps it painted for the
+ * length of the transition - while it fades and scales down. That is a blurred surface both
+ * moving and disappearing, which is the case where the compositor is most likely to leave the
+ * last blur it sampled sitting on the screen after the element has gone. `:not([open])` is
+ * true for exactly that window, and afterwards the sheet is `display: none` and none of this
+ * costs anything.
+ */
+dialog.sheet:not([open]) .sheet-body,
+dialog.sheet:not([open]) .about-body {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--veil-solid);
+}
+dialog.dragging {
+  will-change: translate;
+}
+dialog.dragging .sheet-body,
+dialog.dragging .about-body {
+  cursor: grabbing;
+}
+
+/* The grabber is the affordance, so it answers the drag. */
+dialog.dragging .sheet-body::before {
+  width: 56px;
+  background: var(--rail, var(--fill-2));
+  opacity: 1;
+}
+.sheet-body::before {
+  transition: width var(--spring-snap), opacity var(--t-fast);
+}
+@starting-style {
+  dialog.sheet[open]::backdrop { opacity: 0; }
+}
+@keyframes fade { from { opacity: 0; } }
+
+.sheet-body {
+  position: relative;
+  background: var(--veil-strong);
+  -webkit-backdrop-filter: var(--mat-thick);
+  backdrop-filter: var(--mat-thick);
+  border-radius: var(--r-xl);
+  padding: 24px;
+  display: grid;
+  /*
+   * `minmax(0, 1fr)`, not the implicit `auto` track this used to get. An `auto` column
+   * refuses to go below the widest child's min-content, and the chat composer's min-content
+   * is 331px - the textarea counts its default `cols` width towards it - so on a 320px
+   * screen the column sized itself to 331 inside a 284px box and pushed every row in the
+   * sheet off the side of the display. With the automatic minimum gone the track is the
+   * sheet's own width and the flexible children shrink, which is what they were set up to do.
+   */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  box-shadow: var(--shadow-sheet);
+  max-height: min(90dvh, 900px);
+  overflow-y: auto;
+  /* A sheet scrolls down, never sideways: a stray horizontal scrollbar inside a modal is
+     always a layout bug, so make it impossible to ship one unnoticed. */
+  overflow-x: hidden;
+  /* iOS shows no resting scrollbar on a sheet, and a Windows track drawn down the inside
+     edge of a frosted panel looks like a rendering fault. The lists inside keep theirs. */
+  scrollbar-width: none;
+}
+.sheet-body::-webkit-scrollbar { width: 0; height: 0; }
+.sheet-body.center { text-align: center; justify-items: center; }
+
+/* The channel rail. AirDrop has one colour and so needs none of this; we have three, and
+   a dialog should say which device it is about before a word of it is read. */
+.sheet-body::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  translate: -50% 0;
+  width: 44px;
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: var(--rail, var(--fill-2));
+  opacity: 0.9;
+}
+.rail-local { --rail: var(--ch-local); }
+.rail-paired { --rail: var(--ch-paired); }
+.rail-room { --rail: var(--ch-room); }
+.rail-accent { --rail: var(--accent); }
+
+.sheet h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.sheet h2 .h2-sub {
+  display: block;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+  margin-top: 5px;
+}
+
+/*
+ * The close control on a sheet.
+ *
+ * Named for the cross it used to draw; it is a dash now, which is the quieter mark and the one
+ * that does not read as "discard what you were doing" on a sheet you are only putting away.
+ * The class keeps its name because what it is has not changed - it is still the thing that
+ * closes this - and the glyph is the part that was worth changing.
+ */
+.close-x {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--fill);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--spring-snap);
+}
+.close-x svg { width: 15px; height: 15px; }
+.close-x:hover { background: var(--fill-2); color: var(--text); }
+.close-x:active { transform: scale(0.9); }
+
+.footnote {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  border-top: 0.5px solid var(--line);
+  padding-top: 14px;
+  line-height: 1.5;
+}
+.footnote a { color: var(--accent); }
+
+/*
+ * One button takes the row.
+ *
+ * A lone action tucked into the right-hand corner of a wide panel reads as an afterthought,
+ * and it is usually the only thing there is to do. When it has company they share the row as
+ * before. `:has()` is doing the counting, so nothing has to be toggled from script.
+ */
+.row-buttons { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.row-buttons:not(:has(> :not([hidden]) ~ :not([hidden]))) > :not([hidden]) {
+  flex: 1;
+}
+.gap-above { margin-top: 16px; }
+
+/* code + QR panes */
+
+/*
+ * The two halves read as a pair.
+ *
+ * `start` pinned the shorter column to the top, so "Enter their code" floated above a gap as
+ * tall as the QR code beside it. Centring the whole column closed the gap and broke something
+ * worse: two headings naming the same kind of thing stopped lining up.
+ *
+ * Both panes are the same three parts - a label, the thing itself, and a trailing note or
+ * button - so the label stays at the top, the trailing part sits at the bottom, and only the
+ * middle takes up the slack.
+ */
+.connect-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0.5px minmax(0, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+.pane { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; justify-items: center; min-width: 0; }
+.pane > :nth-child(2) { align-self: center; }
+.pane-label {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.or { background: var(--line); align-self: stretch; min-height: 110px; }
+.or span { display: none; }
+@media (max-width: 620px) {
+  /*
+   * `minmax(0, 1fr)`, not `1fr`. A bare `1fr` is `minmax(auto, 1fr)`, and that automatic
+   * minimum is the track's min-content: the column then refuses to shrink below whatever the
+   * widest thing inside it wants, and on a 320px phone the six code boxes pushed the whole
+   * sheet twelve pixels off the side of the screen, dragging every sibling with it.
+   */
+  .connect-split { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  /*
+   * Stacked, the rule turns on its side and says the word out loud.
+   *
+   * Two columns with a hairline between them read as either/or on their own. One column with
+   * the hairline hidden reads as a list of things to do in order, which is the opposite: the
+   * sheet asks you to show a code or type one, never both.
+   */
+  .or {
+    background: none;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .or::before,
+  .or::after {
+    content: '';
+    flex: 1;
+    height: 0.5px;
+    background: var(--line);
+  }
+  .or span { display: block; }
+}
+
+.code-display { display: grid; gap: 12px; justify-items: center; }
+.code-row {
+  display: flex;
+  gap: 3px;
+  font-family: var(--mono);
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.code-row span {
+  min-width: 1.05ch;
+  text-align: center;
+  animation: char-in var(--spring) both;
+}
+.code-row {
+  color: var(--text);
+  text-shadow: 0 0 24px rgba(var(--accent-rgb), 0.35);
+}
+.code-row span:nth-child(2) { animation-delay: 40ms; }
+.code-row span:nth-child(3) { animation-delay: 80ms; }
+.code-row span:nth-child(4) { animation-delay: 120ms; }
+.code-row span:nth-child(5) { animation-delay: 160ms; }
+.code-row span:nth-child(6) { animation-delay: 200ms; }
+@keyframes char-in {
+  from { opacity: 0; transform: translateY(-7px) scale(0.85); }
+  to { opacity: 1; transform: none; }
+}
+
+/*
+ * The frame is sized, the canvas fills it.
+ *
+ * `--qr` is the picture; the frame is that plus its white margin, and because the box is
+ * `border-box` the padding has to be added rather than assumed. Doing it the other way round
+ * - a sized frame around a fixed canvas - is what made the QR hang out over its own edge.
+ */
+.qr-frame {
+  --qr: 160px;
+  box-sizing: border-box;
+  width: calc(var(--qr) + 24px);
+  height: calc(var(--qr) + 24px);
+  padding: 12px;
+  background: #fff;
+  border-radius: var(--r-lg);
+  line-height: 0;
+  cursor: pointer;
+  /* A pure white block floats off a dark sheet; a ring and a shadow seat it. */
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 8px 24px rgba(0, 0, 0, 0.28);
+  transition: transform var(--spring-snap), box-shadow var(--t-fast);
+}
+/* The canvas has no size of its own any more: its backing store is in device pixels and how
+   large it is drawn is a layout question, which belongs here. */
+.qr-frame canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* The discovery code is a smaller square than the pairing one, and always was. */
+#public-qr-frame { --qr: 150px; }
+body.theme-light .qr-frame { box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(15, 20, 30, 0.1); }
+.qr-frame:hover { box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.5), 0 10px 30px rgba(0, 0, 0, 0.34); }
+.qr-frame:hover { transform: scale(1.03); }
+.qr-frame:active { transform: scale(0.99); }
+
+.code-meta { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+.code-meta .ghost-btn { padding: 7px 14px; font-size: 13px; }
+
+/*
+ * The boxes share the row rather than each taking a fixed width.
+ *
+ * A fixed size is right only at the width it was measured on, and these sit shoulder to
+ * shoulder - a miss overwrites the character next to the one you meant. `min-width: 0` lets
+ * the row be narrower than its contents want; `flex: 1 1 0` on the boxes divides whatever
+ * there is; the cap stops them turning into slabs on a wide sheet. 44px at 320, 52 from about
+ * 400 up, and no breakpoint deciding which.
+ */
+.code-input-row { display: flex; justify-content: center; gap: 4px; width: 100%; min-width: 0; }
+.code-input-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 52px;
+  /* Height and type follow the width, so a narrow box is not also a tall thin one. */
+  height: clamp(46px, 13vw, 50px);
+  text-align: center;
+  font-family: var(--mono);
+  font-size: clamp(18px, 5vw, 21px);
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--fill);
+  border: 1.5px solid transparent;
+  border-radius: var(--r);
+  outline: none;
+  transition: border-color var(--t-fast), background var(--t-fast), transform var(--spring-snap);
+}
+.code-input-row input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  transform: scale(1.04);
+}
+.code-input-row.shake { animation: shake 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-7px); }
+  40%, 60% { transform: translateX(7px); }
+}
+/* verify */
+
+.verify-glyph {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+}
+.verify-glyph svg { width: 28px; height: 28px; }
+
+.sas {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 600;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  background: var(--fill);
+  text-align: center;
+  width: 100%;
+}
+
+/* iOS grouped inset list */
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  font-size: 15px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--fill);
+}
+.meta-grid > :nth-child(even) { text-align: right; }
+
+/*
+ * The picture the offer is of.
+ *
+ * It keeps its own proportions - `--ratio` is set from the dimensions that came with it, so
+ * the sheet is the right height before the image has decoded and the buttons underneath do
+ * not move once it does. The frame is drawn whatever happens: a rendering that fails to
+ * decode leaves the fill rather than collapsing the sheet by a hundred and eighty pixels.
+ *
+ * `contain`, not `cover`: this is the last look before agreeing to something, and a crop that
+ * hides part of it is the wrong thing for a frame whose whole job is to show what it is.
+ */
+.incoming-preview {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--fill);
+  animation: peer-in var(--spring-snap) both;
+}
+/*
+ * The shape belongs to the picture, not to the frame around it.
+ *
+ * With the ratio on the frame and a height cap beside it, the two disagreed: the frame
+ * stopped at the cap while the image inside it kept the height the ratio asked for, and a
+ * portrait photo lost its bottom third to `overflow: hidden`. A preview that crops is worse
+ * than no preview, because it looks like the whole picture.
+ *
+ * Here the cap and the ratio are on the same box, so the image can never be taller than the
+ * frame, and `contain` lets a tall photo sit between two strips of the frame's own fill.
+ */
+.incoming-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: var(--ratio, 4 / 3);
+  max-height: 34vh;
+  object-fit: contain;
+}
+.incoming-preview[hidden] { display: none; }
+
+.file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--fill);
+  max-height: 28vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.file-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 16px;
+  border-bottom: 0.5px solid var(--line);
+  font-size: 14px;
+  /* A row of text, arriving because you asked for it: snappy, not bouncy. */
+  animation: peer-in var(--spring-snap) both;
+}
+.file-list li:last-child { border-bottom: 0; }
+.file-list li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-list li span:last-child {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* an iOS grouped list where the rows are a choice, not a destination */
+
+.choice-list {
+  display: grid;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--fill);
+}
+.choice {
+  --c: var(--accent-rgb);
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 0.5px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.choice:last-child { border-bottom: 0; }
+.choice:hover { background: var(--fill); }
+.choice:active { background: var(--fill-2); }
+
+.choice-icon {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fill-2);
+  color: var(--muted);
+  transition: background var(--t), color var(--t);
+}
+.choice-icon svg { width: 16px; height: 16px; }
+
+.choice-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.choice-text b { font-weight: 550; font-size: 15px; }
+.choice-text span { font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+/* The selected row wears the colour of the channel it turns on, so the choice and the
+   device tiles it will produce are visibly the same thing. */
+.choice[aria-checked='true'] { background: rgba(var(--c), 0.12); }
+.choice[aria-checked='true'] .choice-icon {
+  background: rgb(var(--c));
+  color: #fff;
+}
+.choice[aria-checked='true'] .choice-text b { color: var(--c-text, rgb(var(--c))); }
+.choice[aria-checked='true']::after {
+  content: '✓';
+  margin-left: auto;
+  align-self: center;
+  color: rgb(var(--c));
+  font-weight: 600;
+}
+.choice.ch-local { --c: var(--ch-local-rgb); }
+.choice.ch-room { --c: var(--ch-room-rgb); }
+
+.disc-note { display: grid; gap: 12px; }
+.disc-note .footnote { border-top: 0; padding-top: 0; }
+
+/* paired device manager */
+
+.device-rows {
+  display: grid;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--fill);
+}
+/* Same reason as the rows beside it: the group is a panel on the sheet, not a well cut into it. */
+body.theme-light .device-rows {
+  background: var(--veil-solid);
+  box-shadow: inset 0 0 0 0.5px var(--line);
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid var(--line);
+  /* These arrive with their sheet, so they move with it. */
+  animation: peer-in var(--spring-soft) both;
+}
+.device-row:last-child { border-bottom: 0; }
+.device-row .who { display: grid; gap: 2px; min-width: 0; }
+.device-row .who b { font-weight: 500; font-size: 15px; }
+.device-row .who span { font-size: 13px; color: var(--muted); }
+.device-row .row-tools { display: flex; align-items: center; gap: 10px; }
+.device-row .row-tools .icon-btn { color: var(--danger); }
+
+/* iOS switch */
+.switch {
+  position: relative;
+  width: 51px;
+  height: 31px;
+  flex: none;
+  border-radius: var(--r-pill);
+  border: 0;
+  background: var(--fill-2);
+  cursor: pointer;
+  transition: background var(--t);
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18), 0 1px 1px rgba(0, 0, 0, 0.16);
+  transition: transform var(--spring-snap), width var(--spring-snap);
+}
+.switch[aria-checked='true'] { background: var(--ok); }
+.switch[aria-checked='true']::after { transform: translateX(20px); }
+.switch:active::after { width: 31px; }
+
+/* text */
+
+.text-area,
+.text-received {
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--fill);
+  border: 1.5px solid transparent;
+  border-radius: var(--r-lg);
+  padding: 13px 15px;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--t-fast);
+}
+.text-area:focus { border-color: var(--accent); }
+.text-received {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 38vh;
+  overflow-y: auto;
+  resize: none;
+}
+.text-received a { color: var(--accent); }
+
+.explain {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 12px;
+  font-size: 14.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.explain b { color: var(--text); font-weight: 590; }
+
+/* language list */
+
+.lang-list {
+  display: grid;
+  max-height: 56vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--fill);
+}
+.lang-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 16px;
+  border: 0;
+  border-bottom: 0.5px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.lang-list li:last-child .lang-row { border-bottom: 0; }
+.lang-row:hover { background: var(--fill); }
+.lang-row:active { background: var(--fill-2); }
+.lang-row .en { color: var(--faint); font-size: 13px; }
+.lang-row[aria-current='true'] { color: var(--accent-text); font-weight: 500; }
+.lang-row[aria-current='true']::after { content: '✓'; color: var(--accent-text); font-weight: 600; }
+
+/* ── about: the one full-bleed moment ───────────────────────────────────── */
+
+dialog.full {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 100vw;
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  background: transparent;
+  color: #fff;
+
+  /* Same enter, exit and drag behaviour as a sheet — it is just a sheet the size of the
+     screen, and it should come away under a finger the same way. */
+  /*
+   * It opens as a circle out of the button that opened it.
+   *
+   * `cubic-bezier(0.77, 0, 0.175, 1)` is easeInOutQuart, and it is the curve PairDrop uses for
+   * exactly this - slow to start, fast through the middle, slow to land. On a shape growing
+   * across the whole screen that matters more than it would on a small control: a linear or
+   * ease-out expansion looks like a wipe, and this looks like something opening.
+   *
+   * The origin and the radius are written on the element by the click handler, because both
+   * depend on where the button is. The fallbacks keep it sane if it is ever opened another
+   * way - from the centre of the screen, big enough to cover it.
+   */
+  /*
+   * The close is 300ms, not 800.
+   *
+   * The reveal takes 800ms to open and those three durations were all set to match it, which
+   * is wrong for the other direction: the page faded out in 240ms and then went on holding the
+   * top layer for another 560 with nothing visible in it. For over half a second after you
+   * closed it, it was gone and still in the way.
+   */
+  opacity: 0;
+  /*
+   * Gone for the same reason as on `dialog.sheet`, and it was costing the same thing here:
+   * the links and the detail panel inside this page are both `backdrop-filter` surfaces, and
+   * a will-changed opacity on their ancestor left both of them filtering nothing.
+   */
+  transition:
+    opacity 300ms var(--ease-out),
+    overlay 300ms allow-discrete,
+    display 300ms allow-discrete;
+}
+/*
+ * An animation, not a transition. A transition needs two rendered states and this element
+ * arrives from `display: none`; `@starting-style` with `allow-discrete` did not interpolate
+ * `clip-path` out of it here, so the circle opened at full size every time. A keyframe
+ * animation runs the moment the element starts being rendered and needs no starting rule.
+ * The exit keeps its opacity transition.
+ */
+dialog.full[open] {
+  opacity: 1;
+  animation: about-reveal 800ms cubic-bezier(0.77, 0, 0.175, 1) both;
+}
+@keyframes about-reveal {
+  from { clip-path: circle(0 at var(--from-x, 50%) var(--from-y, 50%)); }
+  to { clip-path: circle(var(--reveal-r, 150vmax) at var(--from-x, 50%) var(--from-y, 50%)); }
+}
+/*
+ * The content waits for the circle.
+ *
+ * PairDrop delays the About page's contents by exactly the length of the reveal's opening
+ * movement - `opacity 300ms ease 300ms` - and the delay is the whole trick. Without it the
+ * text is already there inside a circle that is still growing, so you see the shape pass over
+ * words instead of the shape bringing them with it. With it, the circle opens onto an empty
+ * field and the page arrives a beat later, which is the order those two things have to happen
+ * in for it to read as one movement.
+ *
+ * The close is not delayed: on the way out the text should go first and leave the circle to
+ * collapse after it, which is what a zero delay on a shorter fade gives.
+ */
+dialog.full[open] .about-body > * {
+  animation: about-content 300ms var(--ease-out) 300ms both;
+}
+@keyframes about-content {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+dialog.full::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  /* The same clock as the page in front of it — they are one movement, not two. */
+  transition:
+    opacity 300ms var(--ease-out),
+    overlay 300ms allow-discrete,
+    display 300ms allow-discrete;
+}
+dialog.full[open]::backdrop { opacity: calc(1 - var(--drag, 0) * 0.85); }
+@starting-style {
+  dialog.full[open]::backdrop { opacity: 0; }
+}
+
+/* On a touch device the full page gets a grabber too, so the gesture is discoverable. */
+@media (pointer: coarse) {
+  .about-body::before {
+    content: '';
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    translate: -50% 0;
+    width: 44px;
+    height: 5px;
+    border-radius: var(--r-pill);
+    background: rgba(255, 255, 255, 0.4);
+    transition: width var(--spring-snap);
+  }
+  dialog.dragging .about-body::before { width: 56px; }
+}
+
+.about-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  /*
+   * `safe center`, not `center`. This page is 1045px tall on a 375px phone inside an 812px
+   * window, and centring an overflowing scroller pushes half the overflow above the point it
+   * scrolls from, where nothing can reach it: the mark, the name and the tagline sat at -193,
+   * -115 and -59 and the page opened on the middle of a sentence. `safe` centres while it
+   * fits and aligns to the start when it does not.
+   */
+  align-content: safe center;
+  justify-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  overflow-y: auto;
+  /*
+   * Dark enough to carry white body copy at every point along it, not only at the bottom.
+   *
+   * The old top stop was systemBlue itself, and the tagline sitting on it measured 2.78:1 -
+   * the brightest part of the page under the smallest text on it. The hue is unchanged; only
+   * the lightness comes down, and the gradient still reads as blue going to navy.
+   */
+  background: radial-gradient(120% 90% at 50% 0%, #0f5aa8 0%, #0a3f7d 42%, #041b3f 100%);
+  animation: fade 300ms ease-out;
+}
+body.theme-light .about-body {
+  /*
+   * Darkened, because this page is mostly white text at fifteen pixels.
+   *
+   * The light end of the old gradient was #48A0FF, and white on that measures 2.2:1 - the
+   * whole upper half of the About page was below the floor, including the sentence that says
+   * what the relay cannot do. A gradient that carries body copy has to be dark enough for the
+   * copy along its whole length, not only where it happens to be darkest.
+   */
+  background: radial-gradient(120% 90% at 50% 0%, #17529a 0%, #0b4a92 46%, #042a5c 100%);
+}
+.about-mark { width: 68px; height: 68px; color: #fff; }
+.about-name {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+.about-name sup { font-size: 13px; font-weight: 400; opacity: 0.65; margin-left: 7px; }
+.about-tag {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 15px;
+  margin: 0 0 10px;
+  max-width: 30rem;
+  text-align: center;
+}
+.about-links { display: flex; gap: 10px; }
+.about-links a {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  -webkit-backdrop-filter: var(--mat-thin);
+  backdrop-filter: var(--mat-thin);
+  color: #fff;
+  transition: background var(--t-fast), transform var(--spring-snap);
+}
+.about-links a svg { width: 19px; height: 19px; }
+.about-links a:hover { background: rgba(255, 255, 255, 0.28); }
+.about-links a:active { transform: scale(0.92); }
+.about-detail {
+  max-width: 35rem;
+  margin-top: 18px;
+  padding: 20px 22px;
+  border-radius: var(--r-xl);
+  background: rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: var(--mat-regular);
+  backdrop-filter: var(--mat-regular);
+}
+.about-detail .explain { color: rgba(255, 255, 255, 0.8); }
+.about-detail .explain b { color: #fff; }
+.about-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.18);
+  -webkit-backdrop-filter: var(--mat-thin);
+  backdrop-filter: var(--mat-thin);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--spring-snap);
+}
+.about-close svg { width: 15px; height: 15px; }
+.about-close:hover { background: rgba(255, 255, 255, 0.3); }
+.about-close:active { transform: scale(0.9); }
+
+/* ── banners ────────────────────────────────────────────────────────────── */
+
+/* iOS puts transient notices at the top, under the status bar, as a rounded card. */
+.toast-host {
+  position: fixed;
+  /* Clear of the toolbar, always. A banner that covers the controls is a banner that stops
+     you doing the thing it is telling you about. */
+  top: calc(var(--toolbar-h) + 8px);
+  max-width: min(440px, calc(100vw - 20px - var(--inset-left) - var(--inset-right)));
+  left: 50%;
+  translate: -50% 0;
+  z-index: 70;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  width: min(440px, calc(100vw - 20px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  /* Solid, for the reason the menu is: it appears and disappears over the radar. */
+  background: var(--veil-solid);
+  will-change: opacity, transform;
+  /* Rounder and a little deeper than a panel: this floats over everything else. */
+  border-radius: 18px;
+  padding: 11px 14px;
+  contain: layout paint;
+  font-size: 14px;
+  box-shadow: var(--shadow-pop);
+  /*
+   * Two properties, two speeds - which is how PairDrop animates theirs, and it is right.
+   *
+   * A toast that fades and slides on one clock arrives as a single blur of movement. Bringing
+   * the opacity in faster than the travel means it is already legible while it is still
+   * settling, so the words are readable for the whole of the animation rather than the end
+   * of it. Their numbers exactly: 200ms on the fade, 300ms ease-out on the movement.
+   */
+  animation:
+    toast-fade 200ms var(--ease-out) both,
+    toast-rise 300ms var(--ease-out) both;
+}
+/*
+ * The icon, set the way a phone sets one: a rounded tile the app's mark sits inside, rather
+ * than a dot beside the text. It is what makes a banner read as a notification and not as a
+ * status bar, and it gives the two lines something to align to.
+ */
+.toast-mark {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border-radius: 10px;
+  background: rgba(var(--ring-rgb), 0.14);
+  color: var(--accent);
+  box-sizing: border-box;
+}
+.toast.bad .toast-mark { color: var(--danger); background: rgba(var(--danger-rgb), 0.14); }
+.toast.good .toast-mark { color: var(--ok); background: rgba(var(--ok-rgb), 0.14); }
+
+.toast-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Two short lines rather than one long one: a name is scanned, a sentence is read. */
+  line-height: 1.32;
+}
+.toast-title {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast-body {
+  font-size: 13.5px;
+  color: var(--muted);
+}
+/* On its own, the message is the banner — full size, not a subtitle with nothing above it. */
+.toast-copy > .toast-body:only-child {
+  font-size: 14px;
+  color: var(--text);
+}
+.toast.out { animation: toast-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards; }
+@keyframes toast-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes toast-rise {
+  from { transform: translateY(-22px) scale(0.94); }
+  to { transform: none; }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(-14px) scale(0.96); }
+}
+.toast-action {
+  flex: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 590;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-pill);
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.toast-action:hover { background: rgba(var(--accent-rgb), 0.16); }
+
+/* ── phones ─────────────────────────────────────────────────────────────── */
+
+.mobile-only { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .desktop-only { display: none; }
+  .mobile-only { display: inline; }
+  /*
+   * The dots are for a pointer that can hover. A finger holds the tile instead.
+   *
+   * They stay in the tree rather than being display:none, so a keyboard on a tablet can
+   * still tab to them and gets them back on focus. `pointer-events: none` is what actually
+   * keeps a thumb from hitting an invisible 26px target in the corner of every tile.
+   */
+  .peer-menu-btn,
+  .peer.menu-open .peer-menu-btn {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .peer-menu-btn:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /*
+   * iOS answers a long press before we do: it raises the callout and starts selecting
+   * whatever text is under the finger. On a page that is the right answer. Here it fights
+   * the interface, because holding a tile is how a device menu opens now.
+   *
+   * Off for the furniture, back on for the things people copy. A message, the prose in
+   * About and a pairing code are content. A tile, a banner and a toolbar are not.
+   */
+  body {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .bubble,
+  .about-body,
+  .about-detail,
+  .code-display,
+  .code-row,
+  input,
+  textarea {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
+/*
+ * The device circles and the radar are already fluid, so the breakpoints below only handle
+ * what cannot scale continuously: what the toolbar can afford to show, whether a sheet is a
+ * card or a drawer, and how much vertical chrome a short screen can spare.
+ */
+
+/*
+ * A phone's toolbar gives up words before it gives up targets.
+ *
+ * What goes, in order: the wordmark, then Install (the About page offers it too), then the
+ * status text - and that last one leaves its dot behind, because a dot still answers "is this
+ * thing connected". The buttons themselves do not shrink. They were the first thing sacrificed
+ * here and they were the one thing that should never have been: a control too small to hit is
+ * not a smaller control, it is a broken one, and the space it saves is space nobody asked for.
+ */
+@media (max-width: 460px) {
+  .topbar { gap: 6px; }
+  /* The row spacing does not change with the screen — it is set by the buttons, not the width. */
+  #btn-install { display: none; }
+
+  .chip {
+    gap: 0;
+    padding: 5px;
+  }
+  .chip::before { width: 9px; height: 9px; }
+  /*
+   * Taken off the screen, left in the page.
+   *
+   * `font-size: 0` was the old trick and it is a bad one: the words keep their place in the
+   * layout, so the chip stayed as wide as the text it was no longer showing. Clipping to a
+   * single pixel removes it from the picture and from the flow while leaving it where a screen
+   * reader and the accessibility tree can still find it, which is the whole point - the state
+   * is still being reported, it is only no longer being drawn.
+   */
+  .chip-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Below this the "You can be found:" label pushes the channel chips onto a second line,
+   and the chips say the same thing by themselves. */
+@media (max-width: 400px) {
+  .discovery > .small { display: none; }
+}
+
+/* Landscape on a phone: roughly 390 px of height for everything. The beacon shrinks and the
+   storage line goes — the radar still reads without them, and a device tile does not. */
+@media (max-height: 540px) and (orientation: landscape) {
+  #stage {
+    padding-bottom: min(12vh, 80px);
+    gap: 10px;
+  }
+  footer {
+    gap: 4px;
+    padding-top: 4px;
+    padding-bottom: calc(8px + var(--inset-bottom));
+  }
+  .beacon { width: 34px; height: 34px; }
+  .beacon svg { width: 22px; height: 22px; }
+  .hint { display: none; }
+  .peer { width: clamp(88px, 11vw, 108px); }
+  .avatar {
+    width: clamp(52px, 7vw, 64px);
+    height: clamp(52px, 7vw, 64px);
+  }
+  .empty h1 { font-size: 19px; }
+  .empty p { font-size: 13px; margin-bottom: 12px; }
+  .sheet-body { padding: 18px 20px; }
+  .sheet h2 { font-size: 19px; }
+}
+
+/* A sheet on a phone comes up from the bottom edge and keeps its grabber, the way every
+   iOS sheet does. */
+@media (max-width: 560px) {
+  dialog.sheet {
+    max-width: 100vw;
+    width: 100vw;
+    margin: 0;
+    margin-top: auto;
+    max-height: 92dvh;
+  }
+  .sheet-body {
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    /* Tighter than the desktop sheet by six points top and four bottom, and a smaller gap
+       between rows. On a phone that is the difference between a sheet that ends on the
+       screen and one that ends just past it. */
+    padding: 20px 18px calc(18px + env(safe-area-inset-bottom));
+    gap: 12px;
+    max-height: 92dvh;
+  }
+  /* On a phone it comes up from the edge rather than scaling in place — and that is the
+     same axis the dismissal gesture runs on, so leaving reverses arriving exactly. */
+  dialog.sheet {
+    translate: 0 100%;
+    scale: 1;
+  }
+  .sheet-body { touch-action: pan-y; }
+  @starting-style {
+    dialog.sheet[open] {
+      translate: 0 100%;
+      scale: 1;
+    }
+  }
+  .row-buttons { flex-direction: column-reverse; }
+  .row-buttons > * { width: 100%; }
+  .brand-name { display: none; }
+}
+
+body.dragging::after {
+  content: '';
+  position: fixed;
+  inset: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--r-xl);
+  pointer-events: none;
+  z-index: 30;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/*
+ * A tap leaves :hover applied until you touch something else, so on a touch screen every
+ * hover style becomes a stuck highlight on the last thing you pressed. Pointer feedback
+ * there is :active, which ends with the finger.
+ */
+@media (hover: none) {
+  .peer:hover { background: transparent; }
+  .peer:hover .avatar { transform: none; }
+  .icon-btn:hover { background: transparent; }
+  .icon-btn.on:hover { background: var(--accent); }
+  .cta:hover { background: var(--accent); }
+  .ghost-btn:hover { background: var(--fill); }
+  .ghost-btn.danger:hover { background: rgba(var(--danger-rgb), 0.14); }
+  .menu-item:hover { background: transparent; }
+  .lang-row:hover { background: transparent; }
+  .name-chip:hover { background: transparent; }
+  .close-x:hover { background: var(--fill); }
+  .qr-frame:hover { transform: none; }
+  .ch-chip.pointer:hover { background: rgba(var(--c), 0.16); }
+  .toast-action:hover { background: transparent; }
+  .peer-menu-btn:hover { color: var(--muted); }
+}
+
+
+/*
+ * Without backdrop-filter (older Firefox, some Android WebViews) a translucent panel over a
+ * live radar is unreadable. There the surfaces become solid instead of frosted — the same
+ * material the app already switches to while a sheet is being dragged.
+ */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sheet-body,
+  .menu,
+  .toast,
+  .share-bar,
+  .peer-menu-btn {
+    background-color: var(--veil-solid);
+  }
+  .about-detail,
+  .about-links a,
+  .about-close {
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+
+/* Controls for things this browser cannot do are removed, not disabled — a dead control is
+   worse than an absent one because it implies the feature exists and is broken. */
+body.no-folders .folders-only { display: none !important; }
+body.no-drag .drag-only { display: none !important; }
+
+
+/* A file that runs when it is opened says so where the decision is made, not afterwards. */
+.warn-note {
+  margin: 0;
+  padding: 11px 14px;
+  border-radius: var(--r-lg);
+  background: rgba(var(--warn-rgb), 0.14);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.file-list .risk {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--warn-rgb), 0.22);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 590;
+  vertical-align: 1px;
+}
+
+/*
+ * The safety-word gate on an incoming transfer.
+ *
+ * Deliberately not styled as fine print. It is the one control standing between an
+ * encrypted conversation and an encrypted conversation with the wrong person, so it has to
+ * read as a decision rather than a disclaimer. Unticked it carries the same amber as the
+ * risk badge — this is an unfinished check, not a neutral row — and ticking it settles to
+ * green, which is the only place in the sheet that colour appears.
+ */
+.sas-gate {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  margin: 14px 0 2px;
+  padding: 13px 14px;
+  border-radius: var(--r-lg);
+  background: rgba(var(--warn-rgb), 0.14);
+  border: 1px solid rgba(var(--warn-rgb), 0.42);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 510;
+  line-height: 1.45;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast);
+}
+.sas-gate:hover {
+  background: rgba(var(--warn-rgb), 0.2);
+}
+
+/*
+ * A drawn box rather than the platform default, so it is the same size and shape on every
+ * OS and large enough to hit without aiming.
+ */
+.sas-gate input {
+  appearance: none;
+  -webkit-appearance: none;
+  inline-size: 22px;
+  block-size: 22px;
+  flex: none;
+  margin: 0;
+  border-radius: 7px;
+  border: 2px solid rgba(var(--warn-rgb), 0.75);
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast);
+}
+.sas-gate input::after {
+  content: '';
+  inline-size: 11px;
+  block-size: 6px;
+  border-inline-start: 2.5px solid #fff;
+  border-block-end: 2.5px solid #fff;
+  transform: rotate(-45deg) translate(1px, -1px) scale(0.35);
+  opacity: 0;
+  transition:
+    transform var(--spring-ms) var(--spring-curve),
+    opacity var(--t-fast);
+}
+.sas-gate input:checked {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.sas-gate input:checked::after {
+  transform: rotate(-45deg) translate(1px, -1px) scale(1);
+  opacity: 1;
+}
+.sas-gate:has(input:checked) {
+  background: rgba(var(--ok-rgb), 0.13);
+  border-color: rgba(var(--ok-rgb), 0.4);
+}
+.sas-gate:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (any-pointer: coarse) {
+  .sas-gate {
+    padding: 15px 14px;
+  }
+  .sas-gate input {
+    inline-size: 25px;
+    block-size: 25px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sas-gate,
+  .sas-gate input,
+  .sas-gate input::after {
+    transition-duration: 1ms;
+  }
+}
+
+/*
+ * Removed: an older version of the toolbar buttons.
+ *
+ * When these were rebuilt as layers further up the file, this block was left behind — and
+ * because it came later it kept winning. Everything that followed was tuning a rule that was
+ * never being applied, and the hard one-pixel outline that made the controls look drawn
+ * rather than lit was coming from here the whole time.
+ */
+
+/*
+ * The light, on a layer of its own so it can move.
+ *
+ * It drifts because a light that never moves is a painted highlight, and the moment it
+ * shifts every pane of glass on the screen answers together — the specular slides, the
+ * refraction at the edges changes, and the whole surface reads as one lit scene rather than
+ * as separate decorated rectangles. That is the entire reason to animate anything here.
+ *
+ * Only `transform` is animated, so the browser moves an existing layer rather than repainting
+ * the page; the radar is already asking for a frame every 7 ms and this must not add to that
+ * bill. A minute and a half for one pass, which is slow enough that you never catch it
+ * moving and only notice that the screen is not dead.
+ */
+/*
+ * There is no decorative layer here, and that is the decision.
+ *
+ * This screen already has a strong idea in it: rings going out from a beacon, with a sweep.
+ * That is the app's own image, it is the thing that says what the app does, and it is
+ * already moving. Two soft coloured glows drifting behind it were a second, unrelated idea
+ * competing with the first — the stock look of a dark landing page, and no more specific to
+ * this app than a stock photo would be.
+ *
+ * So the ground is a ground: ink, grain, and a vignette. The life on this screen comes from
+ * the radar, because the radar is the point.
+ */
+
+/*
+ * A material, and the shadow it casts. Nothing else: blur, a tint over it, and a shadow to
+ * lift it off the page. No lit edge and no refraction at the rim — those draw attention to
+ * the frame of a panel whose job is to hold what is inside it, and what makes a material read
+ * as a surface is the shadow anyway.
+ *
+ * `--drop` lets each surface keep its own shadow — a sheet sits further off the page than a
+ * menu — without repeating the rest three times.
+ */
+.sheet-body,
+.menu,
+.toast {
+  box-shadow: var(--drop, var(--shadow-pop));
+}
+.sheet-body { --drop: var(--shadow-sheet); }
+
+/*
+ * Concentric corners.
+ *
+ * A rounded thing inside another rounded thing looks wrong unless the inner radius is the
+ * outer radius minus the gap between them — otherwise the two curves run at different rates
+ * and the inner one appears to bulge at the corners. Apple's guidance calls this
+ * concentricity, and it is the sort of detail nobody consciously notices and everybody sees.
+ */
+.sheet-body {
+  --pad: 24px;
+}
+.sheet-body .device-row,
+.sheet-body .setting-row,
+.sheet-body .choice,
+.sheet-body .code-display {
+  border-radius: calc(var(--r-xl) - var(--pad) + 6px);
+}
+
+/* Settings rows share the shape and rhythm of the device rows above them. */
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--fill);
+}
+/*
+ * On paper the same fill is a slab.
+ *
+ * A twelve-per-cent grey reads as a raised surface on a dark ground and as a hole punched in
+ * a white one — a column of them turns a sheet into a stack of grey bars. Here the row is
+ * nearly the sheet's own white and is found by its edge instead, which is the same way the
+ * device rows just above it are grouped.
+ */
+body.theme-light .setting-row {
+  background: var(--veil-solid);
+  box-shadow: inset 0 0 0 0.5px var(--line);
+}
+
+.setting-row .who {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.setting-row .who b { font-weight: 590; font-size: 15px; }
+.setting-row .who span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.setting-row .row-tools { flex: none; display: flex; align-items: center; gap: 8px; }
+
+/*
+ * Asked for less transparency, give less transparency.
+ *
+ * This setting exists because translucent interfaces are genuinely hard to read for some
+ * people, and a blur that is merely reduced still leaves text sitting on moving colour. The
+ * honest response is to stop being glass: solid surfaces, no refraction, hairlines kept so
+ * the shapes still read.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  .cta,
+  .ghost-btn,
+  .icon-btn,
+  .menu,
+  .sheet-body,
+  .toast {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .menu { background: var(--veil-strong); }
+  .cta::after,
+  .ghost-btn::after { display: none; }
+}
+
+/* A section heading inside a sheet: quiet, and close to what it introduces. */
+.sheet-section {
+  margin: 8px 0 -8px;
+  font-size: 13px;
+  font-weight: 590;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/*
+ * The glass layer sits between the radar and the interface.
+ *
+ * Above the rings, because it refracts them; below everything you can touch, because it is
+ * scenery. It never receives a pointer event, so the real controls on top of it keep every
+ * click, focus and keystroke they had.
+ */
+#glass-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/*
+ * When the layer is live, the CSS glass on the main screen stands down.
+ *
+ * Two implementations of the same effect painting the same button is the one outcome worse
+ * than either alone. Scoped to the header and the stage: a modal dialog renders in the top
+ * layer, above any canvas, so buttons inside a sheet keep the CSS version — which is why
+ * that version is still worth having and has not been deleted.
+ */
+body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn) {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn)::before,
+body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn)::after {
+  display: none;
+}
+/* The focus ring is not decoration and does not stand down with the rest. */
+body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * The lock screen.
+ *
+ * One field and one button, because there is nothing else to do here and no way around it.
+ */
+.lock-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0 10px;
+}
+.lock-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(var(--ring-rgb), 0.22);
+  background: rgba(var(--ring-rgb), 0.08);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+}
+.lock-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.lock-form .cta {
+  flex: 0 0 auto;
+}
+#lock-error,
+#pass-error {
+  color: var(--danger);
+}
+
+/*
+ * The suggested passphrase, readable.
+ *
+ * The one thing on this screen that is meant to be looked at: a passphrase nobody can write
+ * down is a passphrase nobody keeps, and the fields beside it stay masked. Monospaced and
+ * selectable, because it will be copied out by hand as often as by tap.
+ */
+.pass-suggest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin: 2px 0 10px;
+  border-radius: 12px;
+  background: rgba(var(--ring-rgb), 0.08);
+  border: 1px solid rgba(var(--ring-rgb), 0.18);
+}
+.pass-suggest-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pass-suggest code {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+  user-select: all;
+}
+
+/*
+ * A message that has been written and not yet sent.
+ *
+ * Held back rather than struck through: it is going to be delivered, it simply has not been
+ * yet. The clock is drawn where the delivery state belongs on a message, and the whole bubble
+ * sits a little quieter so a column of them reads as a queue rather than as history.
+ */
+.bubble.waiting {
+  /*
+   * The bubble arrives on a spring animation with `both`, which holds the opacity it ends on —
+   * so a plain `opacity` here is overridden by the fill and nothing dims. The mark is what
+   * carries the state; this only has to leave room for it.
+   */
+  padding-right: 30px;
+}
+.bubble.waiting.photo,
+.bubble.waiting.audio {
+  /* Those two have no text for the mark to crowd, so they keep their own padding. */
+  padding-right: 3px;
+}
+.bubble.waiting::after {
+  content: '';
+  position: absolute;
+  right: 9px;
+  bottom: 50%;
+  translate: 0 50%;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.4px solid currentColor;
+  opacity: 0.75;
+  /* The single hand of a clock, at five past. */
+  background:
+    linear-gradient(to bottom, currentColor 0 45%, transparent 45%) 50% 18% / 1.4px 34% no-repeat;
+}
+.bubble.waiting.photo::after,
+.bubble.waiting.audio::after {
+  /* Over a picture or a player, the mark needs its own ground to stay legible. */
+  bottom: 8px;
+  translate: none;
+  background-color: rgba(0, 0, 0, 0.45);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+
+
+/* ── the last word on field sizes ───────────────────────────────────────── */
+
+/*
+ * At the bottom on purpose. A media query adds no specificity, so an override of a plain
+ * class selector is decided on source order alone, and both of these classes are given
+ * their size further up the file. Sitting anywhere above them, this rule loses silently.
+ */
+@media (hover: none) and (pointer: coarse) {
+  /*
+   * Safari zooms in when a field smaller than 16px takes focus, and does not zoom back out
+   * when it loses it, so the app is left sitting crooked until the page is reloaded. The
+   * chat box is the field people open most and the passphrase field is the first thing on a
+   * locked device, which made this the easiest way to end up looking like a web page.
+   */
+  .chat-input,
+  .lock-input {
+    font-size: 16px;
+  }
+}
+
+/*
+ * ── the pairing sheet, sized to the phone it is on ──
+ *
+ * Also at the bottom on purpose: a media query adds no specificity, and every class here is
+ * given its size further up the file, so this is decided on source order alone.
+ *
+ * The QR is the one thing on this sheet with no natural size - it is a square of whatever you
+ * make it - so it is what gives way when the screen is short. 184px on anything roomy, which
+ * is what it has always been, down to a 140px floor where a phone camera can still read it
+ * from a comfortable distance. The gaps come in with it, and together they bring "Add a
+ * device" inside the bottom edge of every current phone rather than fifty pixels past it.
+ */
+@media (max-width: 620px) {
+  .qr-frame { --qr: clamp(116px, 18dvh, 160px); }
+  .connect-split { gap: 12px; }
+  .pane { gap: 8px; }
+  .footnote { padding-top: 10px; }
+}

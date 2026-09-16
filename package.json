@@ -1,0 +1,30 @@
+{
+  "name": "geardrop",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Gear Drop — the most private and fastest browser-to-browser file transfer.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js --dev",
+    "dev:lan": "node server/index.js --dev --tls",
+    "test": "node --test \"test/*.test.js\"",
+    "build": "node scripts/build-static.mjs",
+    "deploy:cloudflare": "wrangler deploy --config deploy/cloudflare/wrangler.toml",
+    "deploy:deno": "deployctl deploy --entrypoint=deploy/deno/relay.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "libheif-js": "^1.23.2",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "@noble/post-quantum": "^0.7.1"
+  },
+  "license": "AGPL-3.0-or-later"
+}

@@ -1,0 +1,164 @@
+/*
+ * The benchmark harness.
+ *
+ * A separate stylesheet because these classes belong to one page, and app.css should not
+ * carry rules the product never uses. It inherits every design token from app.css, so the
+ * two pages cannot drift apart on colour or type.
+ */
+
+body {
+  display: block;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px clamp(14px, 4vw, 28px);
+  background: var(--veil);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border-bottom: 0.5px solid var(--line);
+}
+.bar .brand { font-weight: 590; font-size: 15px; letter-spacing: -0.02em; }
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 22px clamp(14px, 4vw, 28px) 80px;
+  display: grid;
+  gap: 18px;
+}
+
+.card {
+  background: var(--surface);
+  border: 0.5px solid var(--line);
+  border-radius: var(--r-xl);
+  padding: 22px;
+}
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.card p { margin: 0 0 16px; }
+
+.dim { color: var(--muted); }
+.hint { font-size: 13px; }
+
+.row { display: flex; align-items: flex-end; }
+.gap { gap: 12px; }
+.wrap { flex-wrap: wrap; }
+
+.label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.label select {
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--fill);
+  border: 0;
+  border-radius: var(--r);
+  padding: 10px 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.primary {
+  padding: 11px 20px;
+  border-radius: var(--r-pill);
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 590;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--t-fast), opacity var(--t-fast);
+}
+.primary:hover { background: var(--accent-dim); }
+.primary:active { transform: scale(0.96); }
+.primary:disabled { opacity: 0.45; cursor: progress; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 13px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.pill:hover { background: var(--fill-2); }
+.pill-muted { color: var(--muted); }
+
+/* one measured stage */
+
+.transfer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.transfer {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--fill);
+  animation: peer-in var(--spring) both;
+}
+.transfer .top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+.transfer .name { font-weight: 590; font-size: 15px; }
+.transfer .stats {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  text-align: right;
+}
+
+/* the reference table reuses the app's grouped-list look */
+.file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--fill);
+}
+.file-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid var(--line);
+  font-size: 14px;
+}
+.file-list li:last-child { border-bottom: 0; }
+
+@media (max-width: 560px) {
+  .transfer .top { flex-direction: column; }
+  .transfer .stats { text-align: left; }
+  .file-list li { flex-direction: column; gap: 4px; }
+}

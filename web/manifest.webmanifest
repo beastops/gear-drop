@@ -1,0 +1,28 @@
+{
+  "name": "Gear Drop",
+  "short_name": "Gear Drop",
+  "description": "Device-to-device file transfer that the relay cannot read.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "share_target": {
+    "action": "share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [{ "name": "files", "accept": ["*/*"] }]
+    }
+  },
+  "shortcuts": [
+    { "name": "Add a device", "url": "./#add" },
+    { "name": "Open a room", "url": "./#room" }
+  ]
+}

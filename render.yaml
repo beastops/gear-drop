@@ -1,0 +1,26 @@
+# Render blueprint — free tier, WebSockets included.
+#
+#   1. push this repository to GitHub
+#   2. Render → New → Blueprint → pick the repo
+#
+# The free instance sleeps after 15 minutes of inactivity and takes a few seconds to wake.
+# For a rendezvous relay that is survivable: the client reconnects on its own, and there is
+# no state to lose because the relay never had any.
+services:
+  - type: web
+    name: geardrop
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      # Optional: your own TURN server, for networks where even STUN cannot get through.
+      # - key: TURN_URLS
+      #   value: turn:turn.example.org:3478
+      # - key: TURN_SECRET
+      #   sync: false

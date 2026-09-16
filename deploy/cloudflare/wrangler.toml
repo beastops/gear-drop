@@ -1,0 +1,35 @@
+# Gear Drop relay — Cloudflare Workers + Durable Objects.
+#
+#   npm i -g wrangler
+#   wrangler deploy            (from this directory)
+#
+# The free plan includes Workers and SQLite-backed Durable Objects, which is everything
+# this needs: there is no database, no queue and no storage in the design.
+#
+# Optional, set with `wrangler secret put NAME`:
+#   NET_SECRET   enables the opt-in "devices on this network" label. Leave it unset and the
+#                feature is simply unavailable to clients, which is the safer default.
+#   TURN_URLS    comma-separated turn: URLs, if you run a TURN server
+#   TURN_SECRET  coturn use-auth-secret, so credentials are minted per connection
+
+name = "geardrop-relay"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "RENDEZVOUS"
+class_name = "RendezvousRoom"
+
+# SQLite-backed classes are the ones available on the free plan. Nothing is written to it —
+# the binding exists because a Durable Object needs one.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RendezvousRoom"]
+
+# No STUN server by default. Set STUN_URLS here, to one you run, only if you want
+# cross-network direct connections; without it those transfers go over this relay, which
+# is slower and tells nobody else anything. A device on your own network never needs it.
+[vars]
+
+[observability]
+enabled = false
