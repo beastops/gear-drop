@@ -3175,7 +3175,15 @@ body.theme-light .qr-frame { box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(
   border-radius: var(--r-lg);
   background: var(--fill);
 }
-.meta-grid > :nth-child(even) { text-align: right; }
+.meta-grid > :nth-child(even) {
+  text-align: right;
+  /*
+   * Four safety words on a 375px screen wrapped after the third and left the fourth alone on a
+   * line of its own, which reads as something broken at the one moment this sheet is asking for
+   * a careful comparison against another screen. Balanced, they break two and two.
+   */
+  text-wrap: balance;
+}
 
 /*
  * The picture the offer is of.
@@ -3665,9 +3673,27 @@ body.theme-light .about-body {
 
 /* ── banners ────────────────────────────────────────────────────────────── */
 
-/* iOS puts transient notices at the top, under the status bar, as a rounded card. */
+/*
+ * iOS puts transient notices at the top, under the status bar, as a rounded card.
+ *
+ * And it is a popover, which is the only way it can be seen over an open sheet. A modal
+ * `<dialog>` is promoted to the top layer, and the top layer is above every z-index there is,
+ * so a notice raised from inside a sheet - `Copy link` is a button inside one - was drawn
+ * behind that sheet's scrim. `manual` because this is not a menu: it must not close when
+ * something else is clicked, and it must not take focus from the sheet underneath it.
+ *
+ * The rest of this block undoes what the UA does to a popover: centred by `margin: auto`,
+ * `inset: 0`, and a border and background of its own. Without those resets the notices land in
+ * the middle of the window inside a grey box.
+ */
 .toast-host {
   position: fixed;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  inset: auto;
+  overflow: visible;
   /* Clear of the toolbar, always. A banner that covers the controls is a banner that stops
      you doing the thing it is telling you about. */
   top: calc(var(--toolbar-h) + 8px);

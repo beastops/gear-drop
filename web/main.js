@@ -5914,6 +5914,32 @@ function humanError(message, fallback = 'err.generic') {
  * own line is why a phone's notification is readable at a glance. Without a title it stays
  * one line, which is right for "Copied" and wrong for a file arriving from someone.
  */
+/**
+ * Put the notices above whatever is open, and keep them there.
+ *
+ * The top layer is ordered by when each thing was promoted, not by any z-index, so showing the
+ * host once at start-up would leave it underneath every sheet opened afterwards. Re-showing it
+ * as each notice arrives moves it back to the front. A sheet opened *after* a notice covers it
+ * again, which is right: at that point the person has moved on to something else.
+ *
+ * Both calls can throw - hiding what is not shown, showing what already is - and neither is
+ * worth reporting. A browser without `popover` keeps the behaviour it had.
+ */
+function liftToasts() {
+  const host = ui.toastHost;
+  if (!host?.showPopover) return;
+  try {
+    host.hidePopover();
+  } catch {
+    /* it was not showing */
+  }
+  try {
+    host.showPopover();
+  } catch {
+    /* nothing to show it over */
+  }
+}
+
 function toast(text, tone = '', opts = {}) {
   const el = document.createElement('div');
   el.className = `toast ${tone}`.trim();
@@ -5954,6 +5980,7 @@ function toast(text, tone = '', opts = {}) {
   }
 
   ui.toastHost.append(el);
+  liftToasts();
 
   let timer = 0;
   const hide = (ms) => {
