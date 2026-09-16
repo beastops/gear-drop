@@ -116,7 +116,21 @@ Your relay is then `wss://<project>.deno.dev/rv`.
 ## App on Vercel
 
 Vercel serves static files very well and cannot hold a WebSocket open, so it hosts the app
-and points at a relay running somewhere from the list above.
+and points at a relay running somewhere from the list above. Deploy the relay first: the
+app needs its URL at build time.
+
+**From the repository**, which needs nothing installed and redeploys on every push:
+
+1. [vercel.com/new](https://vercel.com/new) and import this repository. Leave every build
+   setting alone; `vercel.json` already carries them.
+2. Add one environment variable, for all environments:
+   `GD_RELAY` = `wss://your-relay.workers.dev/rv`
+3. Deploy.
+
+If you add `GD_RELAY` after the first deploy, redeploy once so the build picks it up. It is
+read while the page is written, not while it is served.
+
+**Or from the command line:**
 
 ```bash
 vercel                                        # link the project
