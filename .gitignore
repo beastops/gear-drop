@@ -34,3 +34,6 @@ desktop.ini
 npm-debug.log*
 coverage/
 .vercel
+
+# A throwaway CDP probe used to drive Chrome on a device over adb. Not part of the app.
+cdp-probe.mjs
