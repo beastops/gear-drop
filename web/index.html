@@ -290,7 +290,26 @@
       <span class="h2-sub" data-i18n="connect.sub">Pair once. After that it reconnects on its own, with no code.</span>
     </h2>
 
-    <div class="connect-split">
+    <!--
+      A code that arrived in a link rather than from somebody's hand.
+
+      Shaped like the room invitation on purpose: a link asking to do something on your behalf
+      should look the same whatever it is asking for. Hidden unless a link actually carried one.
+    -->
+    <div id="connect-invite" hidden>
+      <p class="warn-note" id="connect-invite-what" data-i18n="connect.inviteWhat">This link wants to connect you to
+         a device. Whoever sent it will see your device name and that you’re online, and will be able to offer
+         you files.</p>
+      <div class="code-display">
+        <div class="code-row" id="connect-invite-code"><span>·</span><span>·</span><span>·</span><span>·</span><span>·</span><span>·</span></div>
+      </div>
+      <div class="row-buttons">
+        <button id="btn-connect-invite-no" class="ghost-btn" type="button" data-i18n="common.cancel">Cancel</button>
+        <button id="btn-connect-invite-yes" class="cta" type="button" data-i18n="connect.inviteJoin">Connect</button>
+      </div>
+    </div>
+
+    <div class="connect-split" id="connect-normal">
       <div class="pane">
         <div class="pane-label" data-i18n="connect.show">Show this code</div>
         <div id="code-display" class="code-display">

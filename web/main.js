@@ -108,6 +108,11 @@ const ui = {
   codeTimer: $('code-timer'),
   copyLink: $('btn-copy-link'),
   codeInputs: $('code-inputs'),
+  connectInvite: $('connect-invite'),
+  connectInviteCode: $('connect-invite-code'),
+  connectNormal: $('connect-normal'),
+  connectInviteNo: $('btn-connect-invite-no'),
+  connectInviteYes: $('btn-connect-invite-yes'),
   joinStatus: $('join-status'),
 
   room: $('room-dialog'),
@@ -1526,6 +1531,36 @@ async function joinWithCode(raw) {
   attachSession(session, { viaCode: true });
 }
 
+/**
+ * A pairing code that arrived in a link, shown before it is used.
+ *
+ * Typing six characters is a decision. Opening a link is not, and the handshake this starts is
+ * one somebody else chose the password for - so the safety words, which catch a third party
+ * standing between two devices that meant to meet, cannot catch it. Both ends really do hold the
+ * same code. The only thing that catches it is a person being asked.
+ *
+ * The room invitation and the relay proposal already work this way; this was the one link that
+ * did not.
+ */
+let pendingCodeInvite = null;
+
+function askJoinCode(code) {
+  pendingCodeInvite = code;
+  const cells = [...ui.connectInviteCode.children];
+  code.split('').forEach((ch, i) => {
+    if (cells[i]) cells[i].textContent = ch;
+  });
+  ui.connectInvite.hidden = false;
+  ui.connectNormal.hidden = true;
+  ui.connect.showModal();
+}
+
+function closeCodeInvite() {
+  pendingCodeInvite = null;
+  ui.connectInvite.hidden = true;
+  ui.connectNormal.hidden = false;
+}
+
 function handleUrlFragment() {
   const hash = location.hash.replace(/^#/, '');
   if (!hash) return;
@@ -1549,7 +1584,7 @@ function handleUrlFragment() {
     return;
   }
   const code = normalizeCode(hash);
-  if (code.length === CODE_LEN) joinWithCode(code);
+  if (code.length === CODE_LEN) askJoinCode(code);
 }
 window.addEventListener('hashchange', handleUrlFragment);
 
@@ -5321,6 +5356,16 @@ function bindUi() {
 
 
   bindCodeBoxes(ui.codeInputs, CODE_LEN, joinWithCode);
+
+  ui.connectInviteNo.addEventListener('click', () => {
+    closeCodeInvite();
+    ui.connect.close();
+  });
+  ui.connectInviteYes.addEventListener('click', () => {
+    const code = pendingCodeInvite;
+    closeCodeInvite();
+    if (code) joinWithCode(code);
+  });
   bindCodeBoxes(ui.roomInputs, ROOM_CODE_LEN, (code) => {
     joinRoom(code);
     ui.room.close();
