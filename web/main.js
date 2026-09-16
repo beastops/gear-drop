@@ -5113,6 +5113,23 @@ function bindUi() {
   for (const dlg of document.querySelectorAll('dialog:not([data-no-swipe])')) {
     enableSwipeToDismiss(dlg);
   }
+
+  /*
+   * Focus the panel, not the first button in it.
+   *
+   * `showModal()` focuses the first focusable descendant, which is the close button in the
+   * corner - and Chrome counts that as `:focus-visible`, so the rule that brings a focused
+   * close button back for keyboard users fired on every single open and the button was never
+   * once hidden on a phone. It also meant a screen reader opened every sheet by announcing
+   * "Close" instead of what the sheet is.
+   *
+   * A panel with `tabindex="-1"` takes the focus instead: reachable by script, skipped by Tab,
+   * and the first thing read out is the heading.
+   */
+  for (const body of document.querySelectorAll('dialog .sheet-body, dialog .about-body')) {
+    body.tabIndex = -1;
+    body.autofocus = true;
+  }
   watchModals();
 
   for (const btn of document.querySelectorAll('[data-close]')) {
