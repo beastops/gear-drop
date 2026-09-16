@@ -2471,11 +2471,15 @@ body.theme-light .peer.ready .avatar {
 .ghost-btn::before {
   --glass-spec: 0.18;
 }
-@media (hover: none) {
+@media (pointer: coarse) {
   /*
    * A finger has no hover, so the highlight is placed at the moment of contact instead and
    * must arrive immediately — a transition here would animate it in from wherever the last
    * tap happened to be, which reads as a smear rather than a press.
+   *
+   * Asked as `(pointer: coarse)`. A phone answers `(hover: none)` with `false` - a long press
+   * shows a tooltip, so Chrome calls that hovering - and this rule spent its whole life behind
+   * a query that was never true on the device it describes.
    */
   .cta::before,
   .ghost-btn::before,
@@ -3972,8 +3976,12 @@ body.dragging::after {
  * A tap leaves :hover applied until you touch something else, so on a touch screen every
  * hover style becomes a stuck highlight on the last thing you pressed. Pointer feedback
  * there is :active, which ends with the finger.
+ *
+ * `(pointer: coarse)`, because a phone says `(hover: none)` is false - Chrome counts a long
+ * press as hovering - so this whole block has been inert on exactly the screens it is for, and
+ * the stuck highlight it removes has been there the entire time.
  */
-@media (hover: none) {
+@media (pointer: coarse) {
   .peer:hover { background: transparent; }
   .peer:hover .avatar { transform: none; }
   .icon-btn:hover { background: transparent; }

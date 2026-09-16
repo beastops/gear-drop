@@ -1,7 +1,7 @@
 {
   "name": "Gear Drop",
   "short_name": "Gear Drop",
-  "description": "Device-to-device file transfer that the relay cannot read.",
+  "description": "Device-to-device file transfer that nothing in the middle can read.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

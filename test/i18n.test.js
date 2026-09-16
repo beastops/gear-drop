@@ -300,6 +300,59 @@ test('a numbered label is asked for with the number it needs', () => {
  */
 const EN = TABLES.en;
 
+/*
+ * `relay` is what the thing is; it is not what it is called on screen.
+ *
+ * Almost nobody knows what a relay is, and somebody told their network is blocking a direct
+ * connection is not in a position to learn. It is an encrypted connection to them, and a
+ * transfer using one is simply encrypted. That was a rename across five languages, and the
+ * failure it invites is the half-done one: a chip renamed and the toast behind it not, which
+ * reads as an app unsure what its own parts are called.
+ *
+ * Each language answers for its own word. Checking every table for the English "relay" would
+ * have passed on the Spanish and the Hindi without ever looking at them.
+ */
+const MACHINE_WORD = {
+  en: /\brelay(s|ed|ing)?\b/i,
+  es: /\brel\u00e9s?\b/i,
+  de: /\bRelays?\b/,
+  fr: /\brelais\b/i,
+  hi: /\u0930\u093f\u0932\u0947/,
+};
+
+test('no language calls it a relay on screen', () => {
+  for (const [code, word] of Object.entries(MACHINE_WORD)) {
+    const offenders = Object.entries(TABLES[code])
+      .filter(([, v]) => word.test(v))
+      .map(([k]) => `${code}:${k}`);
+    assert.deepEqual(offenders, [], 'these still say it the machine\u2019s way');
+  }
+});
+
+test('and neither does the markup, or the manifest', () => {
+  // Only what is rendered. An element id, a preloaded module's filename and the comments about
+  // how the thing works are all still correct, and nobody reads them.
+  const shown = HTML.replace(/<!--[\s\S]*?-->/g, '');
+  const left = [...shown.matchAll(/>([^<>]+)</g)].map(([, t]) => t.trim()).filter((t) => /relay/i.test(t));
+  assert.deepEqual(left, [], 'these are on the page');
+
+  const manifest = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'manifest.webmanifest'),
+    'utf8',
+  );
+  assert.ok(!/relay/i.test(JSON.parse(manifest).description), 'the installed app describes itself with it');
+});
+
+test('a transfer on one says it is encrypted, in every language', () => {
+  // Asked for in these words: the status people see is the reassurance, not the plumbing.
+  for (const code of Object.keys(MACHINE_WORD)) {
+    const status = TABLES[code]['st.relayed'];
+    assert.ok(status, `${code} has no relayed status`);
+    assert.ok(status.length <= 24, `${code} status is too long to glance at: "${status}"`);
+  }
+  assert.equal(TABLES.en['st.relayed'], 'encrypted');
+});
+
 test('no string uses a spaced dash to bolt on an explanation', () => {
   const offenders = Object.entries(EN).filter(([, v]) => /\s[—–]\s/.test(v)).map(([k]) => k);
   assert.deepEqual(offenders, [], 'these read as a label with an aside welded on');

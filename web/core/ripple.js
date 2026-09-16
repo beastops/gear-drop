@@ -90,7 +90,9 @@ export class Radar {
      * thermal budget as the modem and the display. It is the last thing in this app still
      * drawing every frame.
      */
-    const ceiling = matchMedia('(hover: none) and (pointer: coarse)').matches ? 1.5 : 2;
+    // `(pointer: coarse)` and not `(hover: none)`: Android Chrome answers the second one
+    // `false`, so the ceiling this line exists to impose was never once applied on a phone.
+    const ceiling = matchMedia('(pointer: coarse)').matches ? 1.5 : 2;
     const dpr = Math.min(ceiling, devicePixelRatio || 1);
     const w = document.documentElement.clientWidth;
     const h = document.documentElement.clientHeight;

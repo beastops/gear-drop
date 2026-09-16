@@ -84,6 +84,41 @@ function rulesWhere(source, bodyTest) {
     .filter(([, body]) => bodyTest(body));
 }
 
+/* ------------------------------------------------- what a phone answers */
+
+/*
+ * `(hover: none)` is false on a phone, so nothing may be gated on it.
+ *
+ * Android Chrome reports `hover: hover` - a long press shows a tooltip, and the spec counts
+ * that - which means every rule written behind `(hover: none)` applies on a desktop and nowhere
+ * else. There is nothing to see in the rule itself; it reads correctly and never runs, and it
+ * took a debugger on a real device to find out. Three rounds of touch work shipped behind it,
+ * including the radar's resolution ceiling, so the only thing in this app still drawing every
+ * frame was drawing at full device pixels on the one device that could not afford it.
+ *
+ * `(pointer: coarse)` is the question that was always meant: is the primary input a finger.
+ */
+test('nothing asks a phone whether it hovers', () => {
+  const ripple = read('web', 'core', 'ripple.js');
+  // The at-rule and the call, not the words: the comments next to each of these quote the query
+  // they replaced, and matching those would be reading prose instead of code.
+  const asked = [
+    ...[...css.matchAll(/@media\s*\(hover:\s*none\)/g)].map(() => 'app.css'),
+    ...[...(main + ripple + glass).matchAll(/matchMedia\(['"`]\(hover:\s*none\)/g)].map(() => 'a script'),
+  ];
+  assert.deepEqual(asked, [], 'these gate touch behaviour on a query no phone matches');
+});
+
+test('the radar shades a phone at fewer pixels than a desktop', () => {
+  const ripple = read('web', 'core', 'ripple.js');
+  assert.match(
+    ripple,
+    /matchMedia\('\(pointer: coarse\)'\)\.matches \? 1\.5 : 2/,
+    'the ceiling is gone, or asks a question a phone answers the desktop way',
+  );
+  assert.match(ripple, /Math\.min\(ceiling, devicePixelRatio/, 'the ceiling is computed and not applied');
+});
+
 /* ------------------------------------------------------------ the shader */
 
 test('the shader only starts on a machine with room to spare', () => {

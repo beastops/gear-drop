@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gear Drop</title>
-<meta name="description" content="Device-to-device file transfer. The relay cannot read your files, impersonate a device, or link your devices across sessions.">
+<meta name="description" content="Device-to-device file transfer. Nothing in the middle can read your files, impersonate a device, or link your devices across sessions.">
 <meta name="theme-color" content="#000000">
 <meta name="color-scheme" content="dark light">
 <meta name="referrer" content="no-referrer">
@@ -438,8 +438,8 @@
       <details class="disc-more">
         <summary data-i18n="disc.more">What this means</summary>
       <ol class="explain">
-        <li data-i18n="net.p1"><b>How it works.</b> The relay gives your network a label and hands the same one to every device connecting from there. Devices with this on use it to find each other.</li>
-        <li data-i18n="net.p2"><b>What it costs.</b> For six hours at a time, the relay can tell that two devices are on the same network. It still can’t see your files, their names or their sizes.</li>
+        <li data-i18n="net.p1"><b>How it works.</b> The encrypted connection gives your network a label and hands the same one to every device connecting from there. Devices with this on use it to find each other.</li>
+        <li data-i18n="net.p2"><b>What it costs.</b> For six hours at a time, the encrypted connection can tell that two devices are on the same network. It still can’t see your files, their names or their sizes.</li>
         <li data-i18n="net.p3"><b>Still check.</b> A device found this way stays unverified until you confirm the safety words.</li>
       </ol>
       </details>
@@ -813,8 +813,8 @@
 <!-- ─────────────────────────── a link proposing a relay ─────────────────── -->
 <dialog id="relay-dialog" class="sheet" data-no-swipe aria-labelledby="relay-title">
   <div class="sheet-body rail-accent">
-    <h2><span id="relay-title" data-i18n="relay.title">This link wants to change your relay</span>
-      <span class="h2-sub" data-i18n="relay.sub">A relay introduces your devices to each other. It never sees your files, only who you meet and when.</span>
+    <h2><span id="relay-title" data-i18n="relay.title">This link wants to change your encrypted connection</span>
+      <span class="h2-sub" data-i18n="relay.sub">The encrypted connection is what introduces your devices to each other. It never sees your files, only who you meet and when.</span>
     </h2>
 
     <div class="meta-grid">
@@ -825,11 +825,11 @@
     <ol class="explain">
       <li data-i18n="relay.p1"><b>It can’t</b> read a file, a name or a message. Those stay locked the whole way.</li>
       <li data-i18n="relay.p2"><b>It can</b> see which devices you meet and when, and it could try to sit in the middle. That’s what the safety words catch.</li>
-      <li data-i18n="relay.p3"><b>Not expecting this?</b> Keep yours. A link that quietly swaps your relay is how someone would watch who you talk to.</li>
+      <li data-i18n="relay.p3"><b>Not expecting this?</b> Keep yours. A link that quietly swaps your encrypted connection is how someone would watch who you talk to.</li>
     </ol>
 
     <div class="row-buttons">
-      <button id="relay-accept" class="ghost-btn danger" type="button" data-i18n="relay.accept">Use the new relay</button>
+      <button id="relay-accept" class="ghost-btn danger" type="button" data-i18n="relay.accept">Use the new one</button>
       <button id="relay-keep" class="cta" type="button" data-i18n="relay.keep">Keep mine</button>
     </div>
   </div>
@@ -868,7 +868,7 @@
       anything here could answer it.
     -->
     <div class="about-build" id="about-build" hidden></div>
-    <p class="about-tag" data-i18n="about.tag">The relay can’t read your files, pretend to be one of your devices, or recognise you from one visit to the next.</p>
+    <p class="about-tag" data-i18n="about.tag">Nothing in the middle can read your files, pretend to be one of your devices, or recognise you from one visit to the next.</p>
 
     <div class="about-links">
       <a href="bench.html" data-i18n-title="nav.bench" title="Benchmark" aria-label="Benchmark"><svg viewBox="0 0 24 24"><use href="#i-bolt"/></svg></a>
@@ -878,13 +878,13 @@
 
     <div class="about-detail">
       <ol class="explain">
-        <li data-i18n="about.p1"><b>The code is the password.</b> Both devices turn it into the same key without ever sending it. The relay can’t work the key out, and it gets one guess at the code.</li>
-        <li data-i18n="about.p2"><b>Everything is locked before it leaves.</b> File names and sizes too, and each one is padded so the relay can’t guess how long it was.</li>
+        <li data-i18n="about.p1"><b>The code is the password.</b> Both devices turn it into the same key without ever sending it. Nothing in the middle can work the key out, and it gets one guess at the code.</li>
+        <li data-i18n="about.p2"><b>Everything is locked before it leaves.</b> File names and sizes too, and each one is padded so nothing in the middle can guess how long it was.</li>
         <li data-i18n="about.p3"><b>Safety words.</b> Both devices work out the same four words from the connection itself. If someone’s in the middle, the two lists won’t match.</li>
         <li data-i18n="about.p4"><b>Files go straight to disk.</b> Nothing piles up in memory, so a huge file needs no more room than a small one.</li>
-        <li data-i18n="about.p5"><b>Paired devices stay anonymous.</b> They meet under a name that changes every ten minutes, so the relay never sees the same one twice.</li>
+        <li data-i18n="about.p5"><b>Paired devices stay anonymous.</b> They meet under a name that changes every ten minutes, so nothing in the middle ever sees the same one twice.</li>
         <li data-i18n="about.pq"><b>Built for later, too.</b> The key is agreed in two separate ways at once, and you’d have to break both. One of them is designed to hold up against quantum computers, so a recording saved today stays shut.</li>
-        <li data-i18n="about.addr"><b>Your address.</b> On the same network, devices use a throwaway name and your real address is never looked up. Further away, everything goes through the relay, so the other device learns nothing about where you are. The relay still sees the address you connect from, like any website does.</li>
+        <li data-i18n="about.addr"><b>Your address.</b> On the same network, devices use a throwaway name and your real address is never looked up. Further away, everything goes through the encrypted connection, so the other device learns nothing about where you are. The site you connect to still sees your address, like any website does.</li>
         <li data-i18n="about.p6"><b>One thing to know.</b> This is a web page, so every time you open it you’re trusting the code it sends you. Everything else is built so that’s the only thing you have to trust.</li>
       </ol>
     </div>
