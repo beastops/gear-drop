@@ -315,9 +315,9 @@ Having learned each other's ids, two members compute `pairTag` and run **the ord
   **unverified** until someone checks the words, and why the network channel is off by
   default and says so in its own dialog.
 
-This is a strictly stronger position than PairDrop's equivalent, where the server performs
-the grouping *and* sees the SDP, but it is not the same as a paired device, and the
-interface does not pretend otherwise.
+The server groups sockets by the address they arrived from and never sees the SDP, so it
+learns that two devices share a network and nothing about what they then say. That is still
+weaker than a paired device, and the interface does not pretend otherwise.
 
 ---
 
@@ -374,7 +374,8 @@ while the session is live.
 * Tags rotate every 10 minutes for paired devices and are single-use for code pairing ⇒ **no stable
   identifier ever reaches the server**.
 * File names, sizes, MIME types and thumbnails live inside `Kt`-sealed control frames, even on the relay
-  path. (In PairDrop these are plaintext to the server whenever the WS fallback is on.)
+  path — the fallback carries the same sealed frames as the direct path, so nothing becomes
+  readable by dropping to it.
 * Padding: control frames are padded to a 256-byte multiple so that a file-name length is not inferable
   from the ciphertext size.
 

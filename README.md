@@ -195,9 +195,6 @@ its own About screen, rather than leaving you to find out.
 
 Gear Drop is [AGPL-3.0-or-later](LICENSE).
 
-It's an independent implementation: no PairDrop or Snapdrop source is copied, adapted or linked.
-Both are fine projects, and the reason this one knew what to aim at.
-
 The libraries under [`web/vendor/`](web/vendor/README.md) keep their own licences —
 `@noble/curves`, `@noble/hashes` and `@noble/post-quantum` (MIT), and `libheif` (LGPL-3.0). They
 are vendored so the app fetches nothing from anywhere else, and each licence sits beside the code

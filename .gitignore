@@ -8,10 +8,26 @@ dist/
 # `npm run dev:lan` generates a fresh pair; they are never the same twice and never shared.
 dev-certs/
 
-# PairDrop's source, kept locally to read while writing docs/01-03. It is somebody else's
-# project under its own licence and has no business in this repository: the notes taken from
-# it are in docs/, and nothing here is derived from the code itself.
+# PairDrop's source, kept locally to read from. It is somebody else's project under its own
+# licence and has no business in this repository, and nothing here is derived from the code.
 reference/
+
+# Notes written while working out what to build: a teardown of another project's architecture
+# and protocol, a catalogue of its defects, and a survey of the alternatives. Useful, and not
+# ours to publish - a list of a live project's security gaps, cross-referenced to file and line,
+# is something you send to the people who maintain it, not something you post under your own
+# name. Kept on disk; only the publishing stops.
+docs/01-pairdrop-architecture.md
+docs/02-pairdrop-protocol-reference.md
+docs/03-defects-and-limits.md
+docs/04-competitive-landscape.md
+
+# The working papers behind the design: the blueprint that argued for it and the roadmap that
+# set its targets. They cite the notes above by finding number and make their case by pointing
+# at another project throughout, so they belong with the notes rather than with the app. What is
+# worth publishing from them is the protocol spec, which is written to stand on its own.
+docs/05-gear-drop-blueprint.md
+docs/07-roadmap-and-benchmarks.md
 
 # Editor and tooling state that belongs to one machine.
 .claude/
