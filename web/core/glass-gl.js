@@ -466,6 +466,20 @@ export class GlassLayer {
     return out;
   }
 
+  /**
+   * Stop drawing. Called when something opaque covers the page, which on this app is any
+   * sheet: the radar already does this, and the glass kept painting a picture nobody could
+   * see. The loop keeps turning so the mirrored radar phase stays in step; it is the draw
+   * that costs, not the arithmetic.
+   */
+  pause() {
+    this._paused = true;
+  }
+
+  resume() {
+    this._paused = false;
+  }
+
   _tick() {
     this._raf = requestAnimationFrame(this._tick);
     if (document.hidden) return;
@@ -480,6 +494,9 @@ export class GlassLayer {
      * of step with the real one.
      */
     const st = this.readState() || {};
+
+    // Covered by a sheet: keep the arithmetic above, skip everything that reaches the GPU.
+    if (this._paused) return;
 
     const now = performance.now();
     if (this._idle && now - this._scanAt < IDLE_SCAN_MS) return;

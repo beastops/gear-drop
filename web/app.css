@@ -4453,3 +4453,48 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
   .pane { gap: 8px; }
   .footnote { padding-top: 10px; }
 }
+
+/*
+ * ── what a phone is asked to draw ──
+ *
+ * At the bottom on purpose: a media query adds no specificity, and every token and rule below
+ * is set further up the file, so this is decided on source order alone.
+ *
+ * A blur is not free. `backdrop-filter` makes the compositor copy what is behind an element,
+ * blur it at the blur radius, and do that again on every frame the element or its backdrop
+ * moves - which, for a sheet that slides in, is every frame of the animation. At 40px over a
+ * full screen, on a GPU sharing a thermal budget with the modem and the screen, that is the
+ * single most expensive thing this app asks for.
+ *
+ * So the materials thin out on touch. They are still glass; they are glass a phone can hold
+ * for an hour without getting warm.
+ */
+@media (hover: none) and (pointer: coarse) {
+  :root {
+    --mat-thin: blur(6px) saturate(150%);
+    --mat-regular: blur(10px) saturate(160%);
+    --mat-thick: blur(14px) saturate(160%);
+    --glass-blur: blur(8px) saturate(160%);
+  }
+
+  /*
+   * And no refraction on a phone.
+   *
+   * `backdrop-filter: url('#gd-lens')` is a real SVG filter resolving against live pixels,
+   * per button, per frame. Chrome does it and Chrome is what most phones run. Apple's own
+   * guidance for this material says to use it sparingly and not to layer it; a phone GPU is
+   * the case where "sparingly" means "not here".
+   *
+   * The button goes solid with it. It was translucent so the blurred backdrop could read
+   * through; with no blur behind it, translucency is just a washed-out button.
+   */
+  .cta {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--accent-fill);
+  }
+  .cta:hover,
+  .cta:active {
+    background: var(--accent-dim);
+  }
+}

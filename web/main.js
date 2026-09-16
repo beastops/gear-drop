@@ -360,8 +360,22 @@ async function boot() {
    * that was always there carries on. The class is what switches the two over, so they can
    * never both be painting at once.
    */
+  /*
+   * The shader is for machines with a fan.
+   *
+   * It redraws the whole window every frame for as long as any control is on screen, at twice
+   * the device's pixel count. A laptop does not notice. A phone gets hot holding the app open,
+   * and a hot phone throttles, which makes everything else stutter too - so the cost is not
+   * only the shader, it is every animation after it.
+   *
+   * A pointer that can hover is the honest test for "this is a machine with room to spare".
+   * Everything else gets the CSS glass, which was always there, costs the compositor one blur
+   * instead of a shader per frame, and looks close enough that this is a trade nobody has to
+   * be told about.
+   */
+  const roomToSpare = matchMedia('(hover: hover) and (pointer: fine)').matches;
   app.glass = new GlassLayer({ readState: () => app.radar.snapshot() });
-  if (app.glass.mount()) document.body.classList.add('gl-glass');
+  if (roomToSpare && app.glass.mount()) document.body.classList.add('gl-glass');
 
   // Establish the wrapping key before anything reads a secret, so no code path can race
   // ahead and find the vault closed.
@@ -5591,8 +5605,14 @@ function watchModals() {
   // conditions go through one function so closing a dialog in a hidden tab cannot wake the
   // radar back up.
   const sync = () => {
-    if (document.hidden || anyOpen()) app.radar?.pause();
-    else app.radar?.resume();
+    // Both layers, not just the radar. The glass was still drawing behind every open sheet.
+    if (document.hidden || anyOpen()) {
+      app.radar?.pause();
+      app.glass?.pause();
+    } else {
+      app.radar?.resume();
+      app.glass?.resume();
+    }
   };
   const observer = new MutationObserver((records) => {
     for (const r of records) {

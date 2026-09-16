@@ -6,7 +6,7 @@ read what they send, impersonate either of them, or link them across sessions.
 ```bash
 npm install
 npm start          # http://localhost:3000
-npm test           # 495 tests
+npm test           # 511 tests
 ```
 
 Open the app on two devices. Click **Add a device** on one and type the six characters on the
@@ -116,7 +116,7 @@ the raw channel ceiling and the cost of encryption and of the streaming sink.
 server/   the relay: moves opaque bytes, keeps nothing
 web/      the client: crypto, transport, transfer engine, UI, benchmark
 deploy/   the same relay for Cloudflare Workers and Deno Deploy
-test/     495 tests: crypto core, protocol invariants, discovery, relay, receive path, UI
+test/     511 tests: crypto core, protocol invariants, discovery, relay, receive path, UI
 docs/     protocol spec, architecture, and the research behind both
 ```
 
