@@ -98,3 +98,31 @@ test('precaching goes past the browser cache to the network', () => {
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   assert.match(sw, /c\.add\(new Request\(u, \{ cache: 'reload' \}\)\)/);
 });
+
+// Read here: the other copy of this is scoped to the test that reads it.
+const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+
+/*
+ * A load that needs nothing says nothing.
+ *
+ * The worker used to answer from the cache and fetch every file again anyway — forty-four
+ * requests to the host each time the app was opened, with the whole shell already on disk,
+ * which nobody waited on and which recorded, forty-four times, the address that opened a
+ * private file-transfer app and the minute it happened.
+ *
+ * The risk is not that somebody deletes this. It is that somebody restores the revalidation,
+ * because stale-while-revalidate is what every guide recommends: strictly better for freshness,
+ * strictly worse for the one property this app is for. Updates do not come from it — the shell
+ * is precached whole on install and `VERSION` changes every release.
+ */
+test('a cached file is served without asking the host for it again', () => {
+  const handler = /addEventListener\('fetch'[\s\S]*?\n\}\);/.exec(swSrc)?.[0];
+  assert.ok(handler, 'the fetch handler is gone');
+
+  // The early return is the whole guarantee: a hit ends the handler before any fetch exists.
+  assert.match(handler, /if \(hit\) return hit;/, 'a cache hit no longer ends the request');
+
+  const hitAt = handler.indexOf('if (hit) return hit;');
+  const fetchAt = handler.indexOf('fetch(e.request)');
+  assert.ok(fetchAt > hitAt, 'there is a fetch that can run even when the cache answered');
+});

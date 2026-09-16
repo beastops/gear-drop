@@ -6,7 +6,7 @@
  * operating system hands one over through the share sheet, and even then it only carries
  * it across to the page. It is never uploaded, cached, or written anywhere.
  */
-const VERSION = 'gd-v2.66.0';
+const VERSION = 'gd-v2.67.0';
 const SHELL = [
   './',
   'index.html',
@@ -167,18 +167,32 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   if (url.pathname === '/ice' || url.pathname === '/rv') return; // always live
 
+  /*
+   * Held means served, and nothing is said to anybody.
+   *
+   * This used to answer from the cache and then fetch the file again regardless, to freshen a
+   * cache that did not need freshening. Nobody waited on those - the cached copy had already
+   * been returned - so their only effect was forty-four requests to the host every time the app
+   * was opened, each one a row recording the address that opened a private file-transfer app
+   * and the minute it happened.
+   *
+   * Dropping them costs no freshness. The shell is precached whole on install, past the HTTP
+   * cache, and `VERSION` changes every release, so a new build arrives through the worker
+   * lifecycle rather than through per-file revalidation. The browser asks for `sw.js` on its own
+   * to find that new version, and that one request is the price of being able to update at all.
+   */
   e.respondWith(
     caches.match(e.request).then((hit) => {
-      const net = fetch(e.request)
-        .then((res) => {
-          if (res.ok && res.type === 'basic' && KEEPABLE.has(url.href)) {
-            const copy = res.clone();
-            caches.open(VERSION).then((c) => c.put(e.request, copy));
-          }
-          return res;
-        })
-        .catch(() => hit);
-      return hit || net;
+      if (hit) return hit;
+      // Not held yet: a lazily loaded decoder the first time a photo needs one. Fetched, and
+      // kept if it is something worth keeping, so it is the last time it has to be asked for.
+      return fetch(e.request).then((res) => {
+        if (res.ok && res.type === 'basic' && KEEPABLE.has(url.href)) {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put(e.request, copy));
+        }
+        return res;
+      });
     }),
   );
 });
