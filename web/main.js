@@ -386,6 +386,18 @@ async function boot() {
   ui.deviceNameText.textContent = app.name;
 
   const stored = (await kv.get('prefs')) || {};
+  /*
+   * A shut vault gives nothing back, and the room is not restored. That is the right answer:
+   * being in a room is a way of being reachable, and it should not resume behind a lock.
+   * A record written before this was sealed still has the code in the clear; it is read here
+   * and sealed by the next write.
+   */
+  if (stored.publicCodeSealed) {
+    const bytes = await unseal(stored.publicCodeSealed);
+    stored.publicCode = bytes ? td.decode(bytes) : null;
+    if (bytes) bytes.fill(0);
+    delete stored.publicCodeSealed;
+  }
   app.prefs = { ...app.prefs, ...stored, theme: app.prefs.theme, lang: app.prefs.lang };
 
   describeStorage();
@@ -593,6 +605,17 @@ async function resealVault(oldKey, newKey) {
   const movedDevice = await move(device);
   if (movedDevice) writes.push(() => kv.set('device', movedDevice));
 
+  /*
+   * And the preferences, which carry the sealed room code.
+   *
+   * `move` finds sealed fields by shape, so a new one is picked up without being named here -
+   * but only inside a record this walk visits, and `prefs` was not one of them. A sealed field
+   * in a record nobody moves is stranded under the old key the first time a passphrase is set.
+   */
+  const prefs = await kv.get('prefs');
+  const movedPrefs = await move(prefs);
+  if (movedPrefs) writes.push(() => kv.set('prefs', movedPrefs));
+
   // Paired devices, and the conversations held with them.
   for (const store of [peerStore, chats]) {
     for (const rec of await store.all()) {
@@ -700,7 +723,15 @@ function loadLocalPrefs() {
 }
 
 async function savePrefs() {
-  const { theme, lang, ...rest } = app.prefs;
+  const { theme, lang, publicCode, ...rest } = app.prefs;
+  /*
+   * The room code is sealed; the rest of the preferences are not.
+   *
+   * Everything else here is a setting - which theme, whether to chime, where to save. The code
+   * is a live secret: five characters that let whoever has them into the room you are in. It
+   * was sitting in the clear beside the others, so a copied profile gave it up in one read.
+   */
+  if (publicCode) rest.publicCodeSealed = await seal(te.encode(publicCode));
   await kv.set('prefs', rest);
 }
 

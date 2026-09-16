@@ -10,6 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { openVault, seal, unseal, sealField, unsealField, vaultMode } from '../web/core/vault.js';
+import fs from 'node:fs';
 import { kv } from '../web/core/store.js';
 
 test('the wrapping key refuses to be exported, by anyone', async () => {
@@ -87,4 +88,43 @@ test('an unreadable pairing is dropped, not treated as trusted', async () => {
 
 test('the vault reports honestly which mode it is in', async () => {
   assert.ok(['protected', 'session'].includes(vaultMode()), vaultMode());
+});
+
+/*
+ * The room code.
+ *
+ * Every other thing this browser keeps was already sealed: the pairing records whole, the
+ * conversations, the pictures in them, the device's private half. `prefs` was not, and `prefs`
+ * carried the five characters that let anybody holding them into the room you are in.
+ */
+test('a room code is stored with none of the code in it', async () => {
+  const code = 'Z6S2T';
+  await kv.set('prefs', {
+    discovery: 'public',
+    publicCodeSealed: await seal(new TextEncoder().encode(code)),
+  });
+
+  const back = await kv.get('prefs');
+  assert.ok(!JSON.stringify(back).includes(code), 'the code is legible in the stored record');
+  assert.equal(new TextDecoder().decode(await unseal(back.publicCodeSealed)), code, 'and it does not come back');
+});
+
+test('the preferences are written sealed, not sealed and plain', async () => {
+  const main = fs.readFileSync(new URL('../web/main.js', import.meta.url), 'utf8');
+  const fn = /async function savePrefs\(\)\s*\{[\s\S]*?\n\}/.exec(main)?.[0];
+  assert.ok(fn, 'savePrefs is gone');
+  assert.match(fn, /publicCodeSealed = await seal\(/, 'the code is written in the clear');
+  // Destructured out of the rest, so it cannot be written twice - once sealed, once not.
+  assert.match(fn, /const \{ theme, lang, publicCode, \.\.\.rest \} = app\.prefs;/, 'the plain field is still in the record');
+});
+
+test('and a passphrase change moves it with everything else', async () => {
+  // `move` finds sealed fields by shape, so this one needs no naming — but only inside a record
+  // the walk visits. A sealed field in a record nobody moves is stranded under the old key the
+  // first time a passphrase is set, which has happened here once already.
+  const main = fs.readFileSync(new URL('../web/main.js', import.meta.url), 'utf8');
+  const fn = /async function resealVault\([\s\S]*?\n\}/.exec(main)?.[0];
+  assert.ok(fn, 'resealVault is gone');
+  assert.match(fn, /kv\.get\('prefs'\)/, 'the preferences are never read, so the sealed code cannot move');
+  assert.match(fn, /kv\.set\('prefs',/, 'the preferences are read and then not written back');
 });
