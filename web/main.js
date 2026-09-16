@@ -428,13 +428,42 @@ async function boot() {
   });
 
   bindUi();
-  showBuild();
-  buildLangList();
-  applyPlatform();
-  askAboutProposedRelay();
-  restoreDiscovery();
-  handleUrlFragment();
-  render();
+  /*
+   * The rest of the start-up, each piece on its own.
+   *
+   * These have nothing to do with one another - one reads the worker's version, one builds the
+   * language list, one restores the discovery mode, one acts on a room code in the link - and
+   * written as plain statements the first to throw ended `boot` and took the others with it.
+   * That happened: `showBuild` was deleted by a patch script and the call to it left behind, so
+   * for three commits the language list was empty, the saved discovery mode was never restored
+   * and a shared link's room code was ignored, while the only symptom was one toast reading
+   * "Something went wrong".
+   *
+   * Each is passed as a function rather than collected into a list, because a list would
+   * evaluate all seven names before the first `try` and a missing one would throw there instead.
+   */
+  bootStep('showBuild', () => showBuild());
+  bootStep('buildLangList', () => buildLangList());
+  bootStep('applyPlatform', () => applyPlatform());
+  bootStep('askAboutProposedRelay', () => askAboutProposedRelay());
+  bootStep('restoreDiscovery', () => restoreDiscovery());
+  bootStep('handleUrlFragment', () => handleUrlFragment());
+  bootStep('render', () => render());
+}
+
+/**
+ * Run one piece of start-up, and if it fails, say which one.
+ *
+ * Not swallowed: the whole reason this exists is that a failure here used to arrive as a single
+ * sentence with no name attached to it. The console gets the name and the real error; the person
+ * gets an app with everything else in it working.
+ */
+function bootStep(name, run) {
+  try {
+    run();
+  } catch (err) {
+    console.error(`Gear Drop: ${name} failed during start-up`, err);
+  }
 }
 
 /**
@@ -5615,6 +5644,32 @@ let modalStack = [];
  * dialog comes and goes, whether by a button, the Escape key, a swipe or the form's own
  * submit, and a path added later cannot forget to tell it.
  */
+/**
+ * Ask the worker which build is actually running this page.
+ *
+ * Not the version in the markup: that is what the server most recently sent, and the point of
+ * the question is whether this browser is showing that or something it cached earlier. The
+ * worker's own version is the one that answers it, and a page with no worker says so.
+ */
+async function showBuild() {
+  const el = document.getElementById('about-build');
+  if (!el) return;
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration?.();
+    const active = reg?.active;
+    if (!active) {
+      el.textContent = 'live, no offline copy';
+    } else {
+      const res = await fetch('sw.js', { cache: 'no-store' });
+      const served = /const VERSION = '([^']+)'/.exec(await res.text())?.[1] || 'unknown';
+      el.textContent = served;
+    }
+    el.hidden = false;
+  } catch {
+    /* nothing to say is better than a wrong answer */
+  }
+}
+
 function watchModals() {
   const dialogs = [...document.querySelectorAll('dialog')];
   modalStack = dialogs.filter((d) => d.open);
