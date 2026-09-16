@@ -117,3 +117,35 @@ test('an origin the operator did not name cannot open a socket', () => {
     assert.match(src, /originAllowed/, `${name} accepts a socket from any page on the internet`);
   }
 });
+
+/*
+ * Who is allowed how much, and by what grain.
+ *
+ * `networkOf` answers "same household" and for IPv6 that is /64. A socket limit keyed that way
+ * gives one subscriber with an ordinary /48 some 65 536 budgets, which is no limit at all — and
+ * the fix has to land on every deployment, because the Node relay is the one people are told to
+ * run when they want the strongest privacy.
+ */
+test('every relay counts sockets against the party, not the subnet', () => {
+  for (const [name, src] of Object.entries({ node, worker })) {
+    assert.match(src, /abuseKeyOf/, `the ${name} relay keys its socket limit by the grouping grain`);
+  }
+});
+
+test('and every relay still groups discovery by household', () => {
+  // The limit moved; what counts as "on this network" must not have moved with it.
+  for (const [name, src] of Object.entries({ node, worker })) {
+    assert.match(src, /networkOf\(/, `the ${name} relay stopped grouping by network`);
+  }
+});
+
+test('no relay invents a budget for an address it cannot read', () => {
+  /*
+   * `abuseKeyOf` returns nothing for anything unparseable, and each call site turns that into
+   * one shared `unknown` bucket. Without the fallback a null key would be counted under its own
+   * entry, which is the bug again wearing a different hat.
+   */
+  for (const [name, src] of Object.entries({ node, worker })) {
+    assert.match(src, /abuseKey\w*\([^)]*\)[\s\S]{0,40}\|\| 'unknown'/, `the ${name} relay has no fallback bucket`);
+  }
+});

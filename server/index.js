@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
 import { Rendezvous, Bucket, frame, FRAME } from './rendezvous.js';
-import { networkOf, ownNetwork, primaryAddress } from './network.js';
+import { networkOf, abuseKeyOf, ownNetwork, primaryAddress } from './network.js';
 
 import { iceServers } from './ice.js';
 
@@ -120,14 +120,40 @@ function originAllowed(req) {
 /** Fixed for the life of the process: interfaces do not move underneath a running relay. */
 const SELF_NETWORK = ownNetwork(os.networkInterfaces(), await primaryAddress(dgram));
 
-function networkLabel(req) {
-  let addr = req?.socket?.remoteAddress || '';
+/**
+ * Where this request came from, as far as this server can honestly tell.
+ *
+ * `X-Forwarded-For` is only believed when the operator says there is a proxy in front, because
+ * otherwise it is simply a header the client wrote.
+ */
+function clientAddress(req) {
   if (conf.trustProxy) {
     const fwd = String(req?.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
-    if (fwd) addr = fwd;
+    if (fwd) return fwd;
   }
+  return req?.socket?.remoteAddress || '';
+}
+
+function networkLabel(req) {
+  const addr = clientAddress(req);
   if (!addr) return null;
   return crypto.createHmac('sha256', netSecret).update(networkOf(addr, SELF_NETWORK)).digest('hex').slice(0, 32);
+}
+
+/**
+ * What the socket limit counts against — a party, not a subnet, and never a header's invention.
+ *
+ * This used to be `networkLabel`, which is two mistakes in one. It groups by /64, so a
+ * subscriber holding an ordinary /48 had 65 536 budgets of 32 sockets against a server that
+ * stops at `maxSockets` long before. And it hashes whatever it is handed, so with `trustProxy`
+ * on - required behind any reverse proxy - a client sending a different piece of nonsense in
+ * `X-Forwarded-For` each time minted a fresh budget each time.
+ *
+ * `abuseKeyOf` is /48, and returns nothing at all for an address it cannot parse, so every
+ * unreadable one falls together into the single `unknown` bucket below.
+ */
+function abuseKey(req) {
+  return abuseKeyOf(clientAddress(req), SELF_NETWORK);
 }
 
 /* ------------------------------------------------------------------ static */
@@ -508,7 +534,7 @@ const onUpgrade = (req, socket, head) => {
   if (!originAllowed(req)) return refuse(403, 'Forbidden');
   if (wss.clients.size >= conf.maxSockets) return refuse(503, 'Service Unavailable');
 
-  const addressKey = networkLabel(req) || 'unknown';
+  const addressKey = abuseKey(req) || 'unknown';
   if ((perAddress.get(addressKey) || 0) >= conf.maxPerAddress) {
     return refuse(429, 'Too Many Requests');
   }
