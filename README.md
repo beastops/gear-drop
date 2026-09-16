@@ -89,6 +89,8 @@ pieces, so a 4 GB file needs no more memory than a small one.
 
 <br>
 
+*The relay is the small server from above — the one that introduces two devices to each other.*
+
 The six-character code is the password input to a **CPace** PAKE over ristretto255, so the
 session key is derived on the two devices and never reaches the relay. Session descriptions,
 ICE candidates, file names and sizes are sealed with AES-256-GCM before the relay sees them,
@@ -155,19 +157,19 @@ Nothing is blocked.
 
 </details>
 
-## Speed
+## Built with
 
-Measured on one laptop, two browser contexts, over loopback:
+Plain HTML, CSS and JavaScript. No framework, no bundler, no build step — the browser runs
+exactly the files in `web/`, so you can read what you're running.
 
-| | |
-|---|---|
-| 512 MB transfer | 15.8 s, 272 Mb/s |
-| Peak memory while receiving | 12 MB |
-| Cost of the encryption | within noise of the raw channel |
+- [WebRTC](https://webrtc.org/) for the transfer itself, with an encrypted fallback for networks that block it
+- [CPace](https://datatracker.ietf.org/doc/draft-irtf-cfrg-cpace/) and [ML-KEM-768](https://csrc.nist.gov/pubs/fips/203/final) for the key agreement, via [@noble](https://paulmillr.com/noble/)
+- AES-256-GCM for everything that leaves a device
+- File System Access and origin-private storage, so files stream to disk instead of filling memory
+- [libheif](https://github.com/strukturag/libheif) to show iPhone photos, fetched only by someone who has one
+- A progressive web app: installable, and it opens without a connection
 
-Open `web/bench.html` to reproduce it on your own machine.
-
-## Run it yourself
+## Host your own
 
 ```bash
 npm install
@@ -175,63 +177,33 @@ npm start          # http://localhost:3000
 npm test
 ```
 
-[`DEPLOY.md`](DEPLOY.md) covers hosting. It runs on free tiers, and the app and the relay can
-live on different services — Cloudflare Workers or Deno Deploy for the relay, Vercel or any
-static host for the app.
+[`DEPLOY.md`](DEPLOY.md) has the rest. It runs on free tiers, and the app and the relay can live
+on different services — Cloudflare Workers or Deno Deploy for the relay, Vercel or any static
+host for the app.
 
-## What's inside
+The wire protocol is written up in full in
+[`docs/`](docs/06-gear-drop-protocol-spec.md), in enough detail to build another client from,
+and `web/bench.html` measures a transfer on your own machine.
 
-```
-server/   the relay: moves opaque bytes, keeps nothing
-web/      the client: crypto, transport, transfer engine, UI, benchmark
-deploy/   the same relay for Cloudflare Workers and Deno Deploy
-test/     crypto core, protocol invariants, discovery, relay, receive path, UI
-docs/     protocol spec, architecture, and the research behind both
-```
+## One thing worth knowing
 
-No bundler and no minifier. The browser runs exactly the files in `web/`, which means you can
-read what you're running.
+This is a web page, so each time you open it you're trusting the code this address sends you.
+Everything above is built so that's the only thing you have to trust — and the app says so on
+its own About screen, rather than leaving you to find out.
 
-| | |
-|---|---|
-| [`06-gear-drop-protocol-spec.md`](docs/06-gear-drop-protocol-spec.md) | the wire protocol, implementable from the document alone |
-| [`05-gear-drop-blueprint.md`](docs/05-gear-drop-blueprint.md) | threat model, crypto core, discovery, transport |
-| [`07-roadmap-and-benchmarks.md`](docs/07-roadmap-and-benchmarks.md) | milestones, targets, measured results |
-| [`01`](docs/01-pairdrop-architecture.md)–[`04`](docs/04-competitive-landscape.md) | research: how comparable tools work, and where they break |
-
-## Not done yet
-
-Parallel lanes exist in the transport but aren't yet benchmarked as a win. The WebTransport
-relay path, resuming across a full page reload, and streaming zip are open. See
-[`07-roadmap-and-benchmarks.md`](docs/07-roadmap-and-benchmarks.md).
-
-## The one thing you do have to trust
-
-This is a web page, so every time you open it you're trusting the code this address sends you.
-Everything above is built so that's the *only* thing you have to trust — and the app says so
-itself, on its own About screen, rather than leaving you to find out.
-
-## Licence and credits
+## Licence
 
 Gear Drop is [AGPL-3.0-or-later](LICENSE).
 
-It's an independent implementation, written from the protocol behaviour documented in
-[`docs/01`](docs/01-pairdrop-architecture.md)–[`docs/03`](docs/03-defects-and-limits.md). No
-PairDrop or Snapdrop source is copied, adapted or linked. Those notes were taken while reading
-their published source, which is not redistributed here. Both are fine projects and the reason
-this one knows what to aim at.
+It's an independent implementation: no PairDrop or Snapdrop source is copied, adapted or linked.
+Both are fine projects, and the reason this one knew what to aim at.
 
-Four libraries are vendored under [`web/vendor/`](web/vendor/README.md) so the app fetches
-nothing from anywhere else: `@noble/curves`, `@noble/hashes` and `@noble/post-quantum` (MIT),
-and `libheif` (LGPL-3.0), which decodes iPhone photos and is downloaded only by someone who
-actually has one. Each licence sits beside the code it covers, and a test checks every vendored
-file against what npm published.
+The libraries under [`web/vendor/`](web/vendor/README.md) keep their own licences —
+`@noble/curves`, `@noble/hashes` and `@noble/post-quantum` (MIT), and `libheif` (LGPL-3.0). They
+are vendored so the app fetches nothing from anywhere else, and each licence sits beside the code
+it covers.
 
 ## Contributing
 
-Issues and pull requests are welcome — [open one here](https://github.com/beastops/gear-drop/issues).
-
-Two house rules, both learned the hard way. Every fix arrives with a test that has been *seen to
-fail* without it, because this repo has shipped tests that asserted nothing and looked green.
-And nothing that touches the crypto or the wire format ships without the spec in
-[`docs/06`](docs/06-gear-drop-protocol-spec.md) being updated in the same change.
+Issues and pull requests are welcome —
+[open one here](https://github.com/beastops/gear-drop/issues).
