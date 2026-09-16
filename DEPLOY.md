@@ -266,11 +266,13 @@ Only onion routing changes that, and it is not a setting.
 ### Putting the app on Cloudflare too
 
 ```bash
-npm install -g wrangler
 wrangler login
-npm run build
-wrangler pages deploy dist --project-name gear-drop
+npm run deploy:app
 ```
+
+Cloudflare has folded Pages into Workers, so this deploys as a Worker serving static assets and
+the URL is `https://<name>.<subdomain>.workers.dev`. That is the same kind of hostname the relay
+already uses, which is the point: Cloudflare publishes an ECH config for it without being asked.
 
 `dist/_headers` is written by the build from `vercel.json`, so Pages applies the same CSP, HSTS
 and cross-origin rules Vercel does. That file is the whole reason this is safe to do: every
@@ -278,11 +280,15 @@ protection outside the app's own code is a response header, none of it is in the
 a host move that left them behind would produce an app that looks identical and has no CSP. It
 is generated rather than copied so the two hosts cannot drift, and a test fails if they do.
 
-Then point the relay at it, so the app's origin is allowed to open sockets:
+Then point the relay at it, or the app comes up saying **offline** and every socket is refused
+with a 403. This is the step that is easy to forget and looks like a broken deployment rather
+than a missing setting:
 
 ```bash
-wrangler secret put ALLOWED_ORIGINS   # https://gear-drop.pages.dev
+echo -n "https://YOUR-APP.workers.dev" | wrangler secret put ALLOWED_ORIGINS   --config deploy/cloudflare/wrangler.toml
 ```
+
+List every origin that should be allowed, comma separated, including any older one still in use.
 
 **The trade, which is real.** Today Vercel sees page loads and Cloudflare sees sockets, and
 neither alone can say who sent what to whom — they would have to compare notes. Move both and one

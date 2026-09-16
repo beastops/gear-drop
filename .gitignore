@@ -53,3 +53,8 @@ coverage/
 
 # A throwaway CDP probe used to drive Chrome on a device over adb. Not part of the app.
 cdp-probe.mjs
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
