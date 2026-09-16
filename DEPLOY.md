@@ -224,6 +224,45 @@ on your relay. A client that sends no `Origin` at all is not a browser and is le
 page's `connect-src` to exactly that origin, so injected script could not open a socket
 somewhere else.
 
+## Hiding which site you are
+
+Everything else here is about what the relay and the app can see. This one is about what your
+*network* can see, which is a different question with a different answer.
+
+TLS encrypts what you send. It does not encrypt **which host you are sending it to** — the name
+travels in the clear in the TLS handshake, so an ISP, an employer or anyone on the path reads it
+without breaking anything. For most sites that hardly matters. For a private file-transfer app it
+is the whole story: they cannot see the files, and they can see that you opened it.
+
+**Encrypted Client Hello** closes that. The hostname is encrypted too, and the network sees only
+a connection to the provider's shared front name on a shared address.
+
+Check any host with:
+
+```bash
+curl -s -H 'accept: application/dns-json' \
+  "https://cloudflare-dns.com/dns-query?name=YOUR-HOST&type=HTTPS" | grep -o 'ech=[^ "]*'
+```
+
+An `ech=` blob means it is on. Nothing means the hostname is readable.
+
+**Where this project stands.** The Cloudflare relay already has it — Cloudflare enables ECH on
+proxied hostnames without being asked, so the handshake presents `cloudflare-ech.com` on an
+anycast address shared with a great many other sites. The app on Vercel publishes no HTTPS record
+at all, so its hostname is readable. The consequence is worth stating plainly: the traffic that
+carries your transfers is already anonymous to your ISP, and the page load that starts it is not.
+
+Putting the app behind the same provider as the relay closes it. Cloudflare Pages, or Cloudflare
+in front of whatever is serving it now.
+
+**Two things to know before relying on it.** ECH needs the browser to fetch that DNS record over
+an encrypted resolver — if DNS is plaintext, the hostname leaks in the lookup instead, and
+nothing has been gained. Most browsers now use DNS-over-HTTPS by default in most regions, but
+"most" is not "all", and it is worth checking rather than assuming.
+
+And it hides *which* site, never *that you connected*. Your address still reaches an address.
+Only onion routing changes that, and it is not a setting.
+
 ## Behind an onion service (the anonymous one)
 
 Every option above hides what you send. None of them hides *that you sent it*, or to whom: the
