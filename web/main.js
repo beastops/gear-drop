@@ -3005,6 +3005,30 @@ async function sendFiles(connId, fileList) {
   if (!conn) return toast(t('toast.notConnected'), 'bad');
   const files = [...(fileList || [])];
   if (!files.length) return;
+
+  /*
+   * The words, before the first file goes to a device nobody has checked.
+   *
+   * Receiving from an unchecked device already puts Accept behind a gate. Sending to that same
+   * device asked nothing, which is the asymmetry the design exists to avoid: somebody standing
+   * in the middle does not care which way the file is travelling, and the sending direction is
+   * the worse of the two, because the thing at risk is a file you chose rather than one you
+   * were offered.
+   *
+   * The condition is the receive gate's, not a second opinion about it — `sasConfirmed`
+   * compares against the words currently in force, so a re-key asks again and a confirmation
+   * cannot be carried across one. A paired device is exempt: the pairing root is the proof, and
+   * asking twice for the same fact is how a check becomes a thing people click through.
+   *
+   * This is the only place it can go. The tile, the picker, the share target and the chat
+   * attachment all arrive here; put on any one of them, the other three would be the hole.
+   */
+  if (!conn.verified && !sasConfirmed(conn)) {
+    heldSend = { connId, files };
+    promptVerify(conn, { force: true });
+    return;
+  }
+
   try {
     await conn.transfers.offer(files, { thumb: await offerPreview(files) });
     toast(files.length === 1 ? t('toast.offer.one', { name: conn.name }) : t('toast.offer.many', { n: files.length, name: conn.name }));
@@ -3420,6 +3444,51 @@ function closeRoomInvite() {
 
 let verifying = null;
 
+/**
+ * Files picked for a device whose words have not been read yet.
+ *
+ * Held here for as long as the question is on screen, so that answering it sends what was
+ * already chosen instead of asking for it again. Cleared whichever way the question is answered,
+ * and on any other path out, so a refused check cannot leave a send queued behind it.
+ */
+let heldSend = null;
+
+/**
+ * Deal with whatever was waiting, now that a question has been answered.
+ *
+ * Three cases, and the middle one is the reason this exists. If the answer was about the device
+ * the files were picked for, they go. If it was about some other device, the question for ours
+ * was never asked - `promptVerify` turns away anything raised while a dialog is open, and
+ * nothing used to come back to it - so it is asked now. And if the device has gone in the
+ * meantime there is nothing to send to and nothing to ask.
+ *
+ * Without the middle case a send could be lost in silence: answer a question about one device
+ * and the file you picked for another is waiting on a question nobody will ever ask.
+ */
+function releaseHeldSend(answered) {
+  if (!heldSend) return;
+
+  if (heldSend.connId === answered.id) {
+    const waiting = heldSend;
+    heldSend = null;
+    if (waiting.files?.length) sendFiles(waiting.connId, waiting.files);
+    return;
+  }
+
+  const other = app.conns.get(heldSend.connId);
+  if (!other) {
+    heldSend = null;
+    return;
+  }
+  if (!other.verified && !sasConfirmed(other)) {
+    promptVerify(other, { force: true });
+    return;
+  }
+  const waiting = heldSend;
+  heldSend = null;
+  if (waiting.files?.length) sendFiles(waiting.connId, waiting.files);
+}
+
 function promptVerify(conn, { force = false, asked = false } = {}) {
   if (verifying || (!force && conn.verified) || !conn.sas) return;
   verifying = conn;
@@ -3448,6 +3517,10 @@ async function resolveVerify(matched) {
    * they receive it. Destroying our own copy is the part that depends on nobody else.
    */
   if (!matched) {
+    // Whatever was waiting for *this* device is not going anywhere. Anything held for another
+    // one is none of this answer's business and stays where it is.
+    if (heldSend?.connId === conn.id) heldSend = null;
+    else releaseHeldSend(conn);
     await destroyConversation(conn.id, { tell: true });
     toast(t('chat.wipedUnverified'), 'bad');
     dropConn(conn.id);
@@ -3500,6 +3573,20 @@ async function resolveVerify(matched) {
   await refreshPaired();
   app.radar.burst();
   toast(t('toast.verified'), 'good');
+
+  /*
+   * And now, last, whatever was picked for this device before the question was asked.
+   *
+   * It has to be last. Run any earlier — it used to run sixteen lines up, right after the
+   * pairing request — and `sendFiles` re-enters against a connection that is not yet marked
+   * verified, meets the gate it has just satisfied, and puts the files back on hold. The same
+   * question about the same device, and a send that silently never happens.
+   *
+   * The id moves with it. This function re-keys the connection under its pairing id, so a record
+   * held against the old one would be looking for a connection that no longer answers to it.
+   */
+  if (heldSend?.connId === oldId) heldSend.connId = id;
+  releaseHeldSend(conn);
 }
 
 /* ───────────────────────────────── text ──────────────────────────────── */

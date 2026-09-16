@@ -127,14 +127,14 @@ test('an origin the operator did not name cannot open a socket', () => {
  * run when they want the strongest privacy.
  */
 test('every relay counts sockets against the party, not the subnet', () => {
-  for (const [name, src] of Object.entries({ node, worker })) {
+  for (const [name, src] of Object.entries({ node, worker, deno })) {
     assert.match(src, /abuseKeyOf/, `the ${name} relay keys its socket limit by the grouping grain`);
   }
 });
 
 test('and every relay still groups discovery by household', () => {
   // The limit moved; what counts as "on this network" must not have moved with it.
-  for (const [name, src] of Object.entries({ node, worker })) {
+  for (const [name, src] of Object.entries({ node, worker, deno })) {
     assert.match(src, /networkOf\(/, `the ${name} relay stopped grouping by network`);
   }
 });
@@ -145,7 +145,45 @@ test('no relay invents a budget for an address it cannot read', () => {
    * one shared `unknown` bucket. Without the fallback a null key would be counted under its own
    * entry, which is the bug again wearing a different hat.
    */
-  for (const [name, src] of Object.entries({ node, worker })) {
+  for (const [name, src] of Object.entries({ node, worker, deno })) {
     assert.match(src, /abuseKey\w*\([^)]*\)[\s\S]{0,40}\|\| 'unknown'/, `the ${name} relay has no fallback bucket`);
+  }
+});
+
+/* ------------------------------------------------------------- the ceilings */
+
+/*
+ * The same protections, everywhere.
+ *
+ * The protocol could not drift because one file holds it. The *defences* were per-deployment
+ * and did drift: the Deno relay, being the shortest and easiest to read as finished, ended up
+ * with none of them — anyone could hold as many sockets open on it as they liked, send frames of
+ * any size, and throw inside the protocol core without the connection being the thing that died.
+ *
+ * Written over all three deliberately. The version of these I added a moment earlier covered
+ * `{ node, worker }`, because those were the two I had just edited — which is precisely how a
+ * third implementation stays broken.
+ */
+test('every relay puts a ceiling on how many sockets it will hold', () => {
+  for (const [name, src] of Object.entries({ node, worker, deno })) {
+    assert.match(src, /MAX_SOCKETS|maxSockets/, `${name} will hold sockets until it falls over`);
+  }
+});
+
+test('every relay refuses an oversized frame before it copies it', () => {
+  for (const [name, src] of Object.entries({ worker, deno })) {
+    // The core refuses an oversized payload too, but only after the whole message has been
+    // copied into a Uint8Array, which is the allocation worth not making.
+    assert.match(src, /byteLength > MAX_FRAME/, `${name} copies a frame before deciding it is too big`);
+  }
+});
+
+test('one bad frame closes one socket, never the relay', () => {
+  for (const [name, src] of Object.entries({ worker, deno })) {
+    assert.match(
+      src,
+      /try \{\s*(?:this\.)?rv\.onFrame/,
+      `${name} lets a throw out of the protocol core instead of ending the connection`,
+    );
   }
 });

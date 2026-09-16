@@ -9,9 +9,24 @@
  *   the relay URL is then wss://<project>.deno.dev/rv
  */
 import { Rendezvous, Bucket, frame, FRAME, TAG_LEN } from '../../server/rendezvous.js';
-import { networkOf } from '../../server/network.js';
+import { networkOf, abuseKeyOf } from '../../server/network.js';
 
 const rv = new Rendezvous();
+
+/**
+ * The same ceilings the other two deployments carry.
+ *
+ * This file had none of them. It is the shortest of the three and the easiest to read as
+ * finished, which is exactly how it ended up being the one anybody could hold open as many
+ * sockets on as they liked.
+ */
+const MAX_FRAME = 512 * 1024;
+const MAX_PER_PARTY = 32;
+const MAX_SOCKETS = 20_000;
+
+/** Sockets currently held, by party. Counted in memory and never written anywhere. */
+const perParty = new Map();
+let liveSockets = 0;
 const enc = new TextEncoder();
 
 // No default, and deliberately not somebody else's. See the note in deploy/cloudflare.
@@ -80,8 +95,35 @@ Deno.serve(async (req, info) => {
   }
   if (!originAllowed(req)) return new Response('forbidden', { status: 403 });
 
+  /*
+   * Counted against the party, the way the other two count.
+   *
+   * `abuseKeyOf` rather than `networkOf`: the second groups households, which is /64, and a
+   * household is handed a /48 - so keyed that way one subscriber would have tens of thousands
+   * of budgets. It also refuses to invent a key for an address it cannot read, so everything
+   * unparseable shares the one bucket below instead of minting its own.
+   */
+  const party = abuseKeyOf(info?.remoteAddr?.hostname || '') || 'unknown';
+  if (liveSockets >= MAX_SOCKETS) return new Response('busy', { status: 503 });
+  if ((perParty.get(party) || 0) >= MAX_PER_PARTY) {
+    return new Response('too many', { status: 429 });
+  }
+
   const { socket, response } = Deno.upgradeWebSocket(req);
   socket.binaryType = 'arraybuffer';
+  liveSockets++;
+  perParty.set(party, (perParty.get(party) || 0) + 1);
+
+  /** Both counters come back down exactly once, whichever way the socket ends. */
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    liveSockets--;
+    const held = (perParty.get(party) || 1) - 1;
+    if (held > 0) perParty.set(party, held);
+    else perParty.delete(party);
+  };
 
   const conn = {
     tags: new Set(),
@@ -108,10 +150,29 @@ Deno.serve(async (req, info) => {
   };
   socket.onmessage = (e) => {
     if (typeof e.data === 'string') return; // text frames are not part of the protocol
-    rv.onFrame(conn, new Uint8Array(e.data));
+    // Refused before it becomes a Uint8Array. The core refuses an oversized payload too, but
+    // only after the whole thing has been copied, which is the allocation worth not making.
+    if (e.data.byteLength > MAX_FRAME) return conn.close(1009, 'too large');
+    /*
+     * One bad frame closes one socket, not the relay.
+     *
+     * The worker has carried this since it was written; this file did not, so a throw inside
+     * `onFrame` escaped into the runtime instead of ending the connection that caused it.
+     */
+    try {
+      rv.onFrame(conn, new Uint8Array(e.data));
+    } catch {
+      conn.close(1011, 'error');
+    }
   };
-  socket.onclose = () => rv.drop(conn);
-  socket.onerror = () => rv.drop(conn);
+  socket.onclose = () => {
+    rv.drop(conn);
+    release();
+  };
+  socket.onerror = () => {
+    rv.drop(conn);
+    release();
+  };
 
   return response;
 });
