@@ -5598,73 +5598,6 @@ let modalStack = [];
  * dialog comes and goes, whether by a button, the Escape key, a swipe or the form's own
  * submit, and a path added later cannot forget to tell it.
  */
-/**
- * Decide, per sheet, whether the browser or this app owns a downward drag.
- *
- * `touch-action: pan-y` hands vertical panning to the browser: the moment a finger moves down
- * it claims the gesture and fires `pointercancel`, so swipe-to-dismiss never sees a move. That
- * is correct for a sheet whose contents scroll and wrong for one whose do not - and since the
- * sheets were sized to fit, most of them do not.
- *
- * The same measurement decides whether the close button may be hidden. A sheet that scrolls
- * keeps `pan-y`, so its gesture is unreliable, so it keeps the button: hiding the only other
- * way out of a sheet the browser is fighting you for is how somebody ends up stuck holding a
- * phone. Taken on open, because it depends on what is in the sheet.
- */
-function tuneDragSurface(dialog) {
-  const body = dialog.querySelector('.sheet-body, .about-body');
-  if (!body) return;
-
-  const measure = () => {
-    const scrolls = body.scrollHeight > body.clientHeight + 1;
-    dialog.classList.toggle('scrolls', scrolls);
-    // CSSOM, not a style attribute: the policy refuses the second and allows the first.
-    body.style.setProperty('touch-action', scrolls ? 'pan-y' : 'none');
-  };
-
-  /*
-   * Measured again once it has stopped moving, and whenever it changes after that.
-   *
-   * Asked at `showModal()` the sheet is still scaling and sliding in, and the answer describes
-   * the animation rather than the sheet: on a real phone Settings reported that it scrolled
-   * when it ends up less than half the height of the window. A `ResizeObserver` fires when the
-   * layout settles, and again when the contents change - a device joining the list, a section
-   * opening - so a sheet that becomes scrollable later gives the gesture back to the browser,
-   * and one that stops scrolling takes it again.
-   */
-  if (!dialog._dragWatch) {
-    dialog._dragWatch = new ResizeObserver(measure);
-    dialog._dragWatch.observe(body);
-  }
-  measure();
-}
-
-/**
- * Ask the worker which build is actually running this page.
- *
- * Not the version in the markup: that is what the server most recently sent, and the point of
- * the question is whether this browser is showing that or something it cached earlier. The
- * worker's own version is the one that answers it, and a page with no worker says so.
- */
-async function showBuild() {
-  const el = document.getElementById('about-build');
-  if (!el) return;
-  try {
-    const reg = await navigator.serviceWorker?.getRegistration?.();
-    const active = reg?.active;
-    if (!active) {
-      el.textContent = 'live, no offline copy';
-    } else {
-      const res = await fetch('sw.js', { cache: 'no-store' });
-      const served = /const VERSION = '([^']+)'/.exec(await res.text())?.[1] || 'unknown';
-      el.textContent = served;
-    }
-    el.hidden = false;
-  } catch {
-    /* nothing to say is better than a wrong answer */
-  }
-}
-
 function watchModals() {
   const dialogs = [...document.querySelectorAll('dialog')];
   modalStack = dialogs.filter((d) => d.open);
@@ -5687,7 +5620,6 @@ function watchModals() {
       const d = r.target;
       const at = modalStack.indexOf(d);
       if (d.open) {
-        tuneDragSurface(d);
         if (at < 0) modalStack.push(d);
       } else if (at >= 0) {
         modalStack.splice(at, 1);

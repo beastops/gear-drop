@@ -121,6 +121,32 @@ function dragToDismiss(el, o) {
     return dt > 8 ? (last.y - first.y) / dt : 0;
   };
 
+  /*
+   * The only listener that can stop the browser scrolling instead.
+   *
+   * `preventDefault()` on `pointermove` is ignored once `touch-action` has permitted the pan -
+   * by then the scroll belongs to the browser, and the drag below never sees a move. A
+   * non-passive `touchmove` is the one place the decision is still open, and it has to be made
+   * on the first move.
+   *
+   * It only refuses what the gesture would take anyway: one finger, past the slop, travelling
+   * the way this thing dismisses, and only when `canStart` already said yes - which for a sheet
+   * means the scroller is at its top. Anywhere else this does nothing and the browser scrolls,
+   * which is the behaviour every sheet on a phone has.
+   */
+  el.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!armed || e.touches.length !== 1 || !e.cancelable) return;
+      const dy = e.touches[0].clientY - startY;
+      const dx = e.touches[0].clientX - startX;
+      if (Math.abs(dy) < SLOP) return;
+      if (Math.abs(dx) > Math.abs(dy) || dy * o.sign < 0) return;
+      e.preventDefault();
+    },
+    { passive: false },
+  );
+
   el.addEventListener('pointerdown', (e) => {
     if (!touchInput) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;

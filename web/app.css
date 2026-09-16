@@ -4559,13 +4559,13 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
    * its close button is the only way out and stays. Hidden rather than removed, and brought
    * back by `:focus-visible`, so a switch, a keyboard or a screen reader still finds it.
    */
-  dialog:not([data-no-swipe]):not(.scrolls) .close-x[data-close],
-  dialog:not([data-no-swipe]):not(.scrolls) .about-close[data-close] {
+  dialog:not([data-no-swipe]) .close-x[data-close],
+  dialog:not([data-no-swipe]) .about-close[data-close] {
     opacity: 0;
     pointer-events: none;
   }
-  dialog:not([data-no-swipe]):not(.scrolls) .close-x[data-close]:focus-visible,
-  dialog:not([data-no-swipe]):not(.scrolls) .about-close[data-close]:focus-visible {
+  dialog:not([data-no-swipe]) .close-x[data-close]:focus-visible,
+  dialog:not([data-no-swipe]) .about-close[data-close]:focus-visible {
     opacity: 1;
     pointer-events: auto;
   }
