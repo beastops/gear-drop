@@ -9,6 +9,7 @@
  *   the relay URL is then wss://<project>.deno.dev/rv
  */
 import { Rendezvous, Bucket, frame, FRAME, TAG_LEN } from '../../server/rendezvous.js';
+import { networkOf } from '../../server/network.js';
 
 const rv = new Rendezvous();
 const enc = new TextEncoder();
@@ -57,9 +58,12 @@ async function networkLabel(info) {
   if (!NET_SECRET) return null;
   const addr = info?.remoteAddr?.hostname;
   if (!addr) return null;
+  // Grouped by network, not by address. On IPv6 there is no NAT, so every device in a home
+  // has its own global address and hashing it makes each one its own network - which is
+  // local discovery finding nobody. `networkOf` is the one place that decides this.
   const window = Math.floor(Date.now() / (6 * 3600_000));
   const key = await crypto.subtle.importKey('raw', enc.encode(NET_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(`${window}:${addr}`)));
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(`${window}:${networkOf(addr)}`)));
   return [...sig.subarray(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 

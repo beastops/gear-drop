@@ -10,7 +10,15 @@
  *
  * So a private address is grouped by its subnet rather than by the host. A /24 for IPv4 and
  * a /64 for IPv6 is what "the same network" means in practice, and both are ranges the
- * devices can already reach each other across directly. Public addresses are left alone.
+ * devices can already reach each other across directly. A public IPv4 address is left alone,
+ * because the NAT in front of it has already done the grouping.
+ *
+ * A public IPv6 address is not left alone, and that is the one that is easy to get wrong.
+ * IPv6 has no NAT: the ISP delegates a prefix, every device takes its own global /128 inside
+ * a /64, and privacy extensions rotate that /128 every few hours. Treated as hosts, two
+ * phones in one room are two networks, and a device stops matching itself when its address
+ * rotates. A /64 is what gets delegated per LAN, so it is the IPv6 spelling of "behind one
+ * NAT", and it is what every IPv6 address groups by here.
  *
  * The result is only ever used as the input to an HMAC under a secret that is re-rolled
  * every six hours; the address itself is used and discarded in the same expression.
@@ -49,14 +57,20 @@ export function networkOf(raw, selfNetwork = null) {
 
   if (addr.includes(':')) {
     const lower = addr.toLowerCase();
-    // Unique-local and link-local IPv6 are the same situation as a private IPv4 range.
-    if (/^f[cd]/.test(lower) || /^fe[89ab]/.test(lower)) {
-      const full = expandV6(lower);
-      // Splitting the written form does not work: `fe80::1` and `fe80::2` are the same /64
-      // but have different pieces once you cut on colons, so they would land in different
-      // groups and never see each other. Expand first, then take the network half.
-      return full ? full.slice(0, 4).join(':') + '::/64' : lower;
-    }
+    /*
+     * Every IPv6 address groups by its /64, global ones included.
+     *
+     * Unique-local and link-local are the obvious cases, and are the same situation as a
+     * private IPv4 range. A global address is the case that matters most and used to be
+     * excluded: with no NAT to group them, each device in a home has its own /128 and the
+     * whole feature found nobody. The /64 is the link they share.
+     *
+     * Splitting the written form does not work: `fe80::1` and `fe80::2` are the same /64 but
+     * have different pieces once you cut on colons, so they would land in different groups
+     * and never see each other. Expand first, then take the network half.
+     */
+    const full = expandV6(lower);
+    return full ? full.slice(0, 4).join(':') + '::/64' : lower;
   }
 
   return addr;

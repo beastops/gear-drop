@@ -14,6 +14,7 @@
  *   the relay URL is then  wss://<worker>.<subdomain>.workers.dev/rv
  */
 import { Rendezvous, Bucket, frame, FRAME, TAG_LEN } from '../../server/rendezvous.js';
+import { networkOf } from '../../server/network.js';
 
 /**
  * All sockets land in one Durable Object.
@@ -55,18 +56,44 @@ export default {
  * exactly the lifetime the protocol wants: there is nothing to persist and nothing to
  * restore, here or anywhere else in this system.
  */
+/** As large a frame as the protocol ever needs. The Node relay refuses the same size. */
+const MAX_FRAME = 512 * 1024;
+
+/** Sockets one network may hold at once. A NAT shares one, so it is generous. */
+const MAX_PER_NETWORK = 32;
+
+/** And a ceiling for the object as a whole, so one busy network cannot fill it. */
+const MAX_SOCKETS = 20_000;
+
 export class RendezvousRoom {
   constructor(state, env) {
     this.state = state;
     this.env = env;
     this.rv = new Rendezvous();
     this.conns = new Map(); // WebSocket -> conn shim
+    this.perNetwork = new Map(); // network key -> sockets held
   }
 
   async fetch(request) {
+    /*
+     * Counted per network, the way the Node relay counts per address.
+     *
+     * The key is derived and held as a counter for the life of the socket and never stored,
+     * sent or logged - the same thing `networkLabel` does with the same input, one line
+     * further down.
+     */
+    const netKey = networkOf(request.headers.get('CF-Connecting-IP') || '') || 'unknown';
+    if (this.conns.size >= MAX_SOCKETS) {
+      return new Response('busy', { status: 503 });
+    }
+    if ((this.perNetwork.get(netKey) || 0) >= MAX_PER_NETWORK) {
+      return new Response('too many', { status: 429 });
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
+    this.perNetwork.set(netKey, (this.perNetwork.get(netKey) || 0) + 1);
 
     const conn = {
       tags: new Set(),
@@ -91,12 +118,30 @@ export class RendezvousRoom {
     server.addEventListener('message', (e) => {
       // Text frames are not part of the protocol.
       if (typeof e.data === 'string') return;
-      this.rv.onFrame(conn, new Uint8Array(e.data));
+      // Nor is anything this large. The Node relay refuses it at the socket; there is no
+      // equivalent knob here, so it is refused on arrival.
+      if (e.data.byteLength > MAX_FRAME) return conn.close(1009, 'too large');
+      /*
+       * One bad frame closes one socket, not the relay.
+       *
+       * Every socket on this deployment lives in this one object, so letting `onFrame` throw
+       * would take the object down and drop every rendezvous anybody had open with it. The
+       * Node relay has always caught this; here it is the difference between one client
+       * being disconnected and all of them.
+       */
+      try {
+        this.rv.onFrame(conn, new Uint8Array(e.data));
+      } catch {
+        conn.close(1011, 'error');
+      }
     });
 
     const gone = () => {
       this.rv.drop(conn);
       this.conns.delete(server);
+      const held = (this.perNetwork.get(netKey) || 1) - 1;
+      if (held > 0) this.perNetwork.set(netKey, held);
+      else this.perNetwork.delete(netKey);
     };
     server.addEventListener('close', gone);
     server.addEventListener('error', gone);
@@ -160,8 +205,19 @@ function networkLabel(request, env) {
   if (!env.NET_SECRET) return null;
   const addr = request.headers.get('CF-Connecting-IP') || '';
   if (!addr) return null;
+  /*
+   * Grouped by network, not by address, and by the same rule the Node relay uses.
+   *
+   * This hashed the raw address, which is right for IPv4 behind a NAT and wrong for
+   * everything else: on IPv6 every device in a home has its own global address, so each one
+   * became its own network and local discovery found nobody. `networkOf` is the one place
+   * that decides what a network is, and both relays now ask it rather than each having an
+   * opinion. The address is used and discarded in this expression either way.
+   */
   const window = Math.floor(Date.now() / (6 * 3600_000));
-  return hmacSha1(env.NET_SECRET, `${window}:${addr}`).replace(/[^a-f0-9]/gi, '').slice(0, 32);
+  return hmacSha1(env.NET_SECRET, `${window}:${networkOf(addr)}`)
+    .replace(/[^a-f0-9]/gi, '')
+    .slice(0, 32);
 }
 
 /** Tiny synchronous HMAC-SHA1, because ICE credentials are minted per connection. */

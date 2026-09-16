@@ -9,6 +9,9 @@
  * differed and the feature silently found nobody.
  */
 import test from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
 import { networkOf } from '../server/network.js';
@@ -65,9 +68,65 @@ test('unique-local IPv6 groups by its own /64', () => {
   assert.notEqual(networkOf('fd12:3456:789a:1::1'), networkOf('fd12:3456:789a:2::1'));
 });
 
-test('a public IPv6 address is left as it is', () => {
-  assert.equal(networkOf('2606:4700::1111'), '2606:4700::1111');
-  assert.notEqual(networkOf('2606:4700::1111'), networkOf('2606:4700::1112'));
+/*
+ * The case a NAT hides on IPv4 and exposes on IPv6.
+ *
+ * This used to assert the opposite - that a global IPv6 address is left alone, the way a
+ * public IPv4 one is. The reasoning does not carry: a public IPv4 address is one household
+ * because the NAT made it one, and IPv6 has no NAT. Every device takes its own global /128
+ * out of the /64 the ISP delegated, and privacy extensions change that /128 every few hours.
+ *
+ * Left as hosts, two phones on one sofa are two networks and local discovery finds nobody,
+ * which is what happened on a real connection: a laptop at
+ * 2401:4900:8f5d:2c2c:7c54:d1e9:93ec:5c3e could not see a phone on the same Wi-Fi.
+ */
+test('two devices in one home share a network on IPv6, where there is no NAT to group them', () => {
+  const laptop = '2401:4900:8f5d:2c2c:7c54:d1e9:93ec:5c3e';
+  const phone = '2401:4900:8f5d:2c2c:aaaa:bbbb:cccc:dddd';
+  assert.equal(networkOf(laptop), networkOf(phone), 'same /64, so the same network');
+
+  // And the same device after its privacy address rotates is still itself.
+  const laptopLater = '2401:4900:8f5d:2c2c:0000:1111:2222:3333';
+  assert.equal(networkOf(laptop), networkOf(laptopLater));
+});
+
+test('a different /64 is a different home', () => {
+  assert.notEqual(
+    networkOf('2401:4900:8f5d:2c2c::1'),
+    networkOf('2401:4900:8f5d:9999::1'),
+    'two prefixes, two households',
+  );
+  assert.notEqual(networkOf('2606:4700::1111'), networkOf('2401:4900:8f5d:2c2c::1'));
+});
+
+/*
+ * A /64 and no wider. An ISP delegates a /56 or a /48 to a customer and the router puts one
+ * /64 on each LAN, so grouping any wider would start putting neighbours together.
+ */
+test('grouping stops at the /64 and does not widen to the delegated prefix', () => {
+  assert.notEqual(networkOf('2401:4900:8f5d:0001::1'), networkOf('2401:4900:8f5d:0002::1'));
+});
+
+/*
+ * Both relays have to agree on what a network is.
+ *
+ * The Cloudflare relay is a separate implementation of the same protocol, and it hashed the
+ * raw client address instead of calling `networkOf` - so the IPv4 subnet grouping was absent
+ * and every IPv6 device was its own network. Checked at the source level because the worker
+ * needs a Cloudflare runtime to import, and the property worth holding is simply that it
+ * asks this module rather than having an opinion of its own.
+ */
+test('the Cloudflare relay groups by network rather than by address', () => {
+  const worker = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'deploy', 'cloudflare', 'worker.js'),
+    'utf8',
+  );
+  assert.match(worker, /import \{ networkOf \} from '\.\.\/\.\.\/server\/network\.js'/);
+  assert.match(worker, /networkOf\(addr\)/, 'the label is derived from the network');
+  assert.ok(
+    !/\$\{window\}:\$\{addr\}/.test(worker),
+    'the raw address is being hashed, so every IPv6 device is its own network',
+  );
 });
 
 test('nonsense in does not produce a grouping that lumps strangers together', () => {
