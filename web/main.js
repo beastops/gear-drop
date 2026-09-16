@@ -5128,7 +5128,7 @@ function bindUi() {
    */
   for (const body of document.querySelectorAll('dialog .sheet-body, dialog .about-body')) {
     body.tabIndex = -1;
-    body.autofocus = true;
+    body.setAttribute('autofocus', '');
   }
   watchModals();
 
