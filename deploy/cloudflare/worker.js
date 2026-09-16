@@ -14,7 +14,7 @@
  *   the relay URL is then  wss://<worker>.<subdomain>.workers.dev/rv
  */
 import { Rendezvous, Bucket, frame, FRAME, TAG_LEN } from '../../server/rendezvous.js';
-import { networkOf } from '../../server/network.js';
+import { networkOf, abuseKeyOf } from '../../server/network.js';
 
 /**
  * All sockets land in one Durable Object.
@@ -82,7 +82,15 @@ export class RendezvousRoom {
      * sent or logged - the same thing `networkLabel` does with the same input, one line
      * further down.
      */
-    const netKey = networkOf(request.headers.get('CF-Connecting-IP') || '') || 'unknown';
+    /*
+     * Counted against the party, not the subnet.
+     *
+     * `networkOf` groups by /64, which is a household - and a household is handed a /48, so
+     * 65 536 of them. Keyed that way this limit was 32 sockets per /64 and two million per
+     * customer, which the relay's own ceiling beats to the punch. `abuseKeyOf` is /48: one
+     * subscriber, one budget, however many subnets they were given.
+     */
+    const netKey = abuseKeyOf(request.headers.get('CF-Connecting-IP') || '') || 'unknown';
     if (this.conns.size >= MAX_SOCKETS) {
       return new Response('busy', { status: 503 });
     }

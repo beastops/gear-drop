@@ -121,7 +121,9 @@ test('the Cloudflare relay groups by network rather than by address', () => {
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'deploy', 'cloudflare', 'worker.js'),
     'utf8',
   );
-  assert.match(worker, /import \{ networkOf \} from '\.\.\/\.\.\/server\/network\.js'/);
+  // The import list, not its exact spelling: the worker also pulls in `abuseKeyOf`, which is a
+  // different question — the grain a rate limit counts against, not the grain devices group by.
+  assert.match(worker, /import \{[^}]*networkOf[^}]*\} from '\.\.\/\.\.\/server\/network\.js'/);
   assert.match(worker, /networkOf\(addr\)/, 'the label is derived from the network');
   assert.ok(
     !/\$\{window\}:\$\{addr\}/.test(worker),
@@ -181,4 +183,19 @@ test('finding the primary address never hangs the relay', async () => {
     createSocket: () => ({ on() {}, connect() {}, close() {}, address: () => null }),
   };
   assert.equal(await primaryAddress(silent, 20), null, 'a socket that never connects times out');
+});
+
+test('and counts a rate limit against the party, not the subnet', () => {
+  /*
+   * These are two questions that sound alike. Grouping asks "same household" and answers /64,
+   * which is right — a household is delegated a /64. A limit asks "how many sockets may one
+   * party hold", and /64 is wrong there, because a household is handed a /48: 65 536 /64s, each
+   * of which looked like a separate household and got its own budget.
+   */
+  const worker = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'deploy', 'cloudflare', 'worker.js'),
+    'utf8',
+  );
+  assert.match(worker, /const netKey = abuseKeyOf\(/, 'the socket limit is keyed by the grouping grain again');
+  assert.match(worker, /networkOf\(addr\)/, 'and the label still groups by network');
 });

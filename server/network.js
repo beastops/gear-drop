@@ -166,3 +166,49 @@ export function primaryAddress(dgram, timeoutMs = 400) {
     }
   });
 }
+
+/**
+ * The key a rate limit counts against: one party, however many subnets they were handed.
+ *
+ * Deliberately not `networkOf`. That answers "same household", and for IPv6 it answers /64 -
+ * correct for grouping, and useless for counting, because a household is not given one /64. It
+ * is given a /56 or a /48, so 256 or 65 536 of them, each looking like a separate household to
+ * anything keyed that way. A limit of 32 sockets per /64 is a limit of two million per customer,
+ * which is no limit at all: the relay's own ceiling is reached long before it.
+ *
+ * /48 is the largest block normally delegated to one subscriber, so it is the widest thing that
+ * is still one party. Anyone holding more than a /48 is an organisation big enough to be worth
+ * treating as several, which is the right answer for them too.
+ *
+ * IPv4 needs none of this. An address there is already a customer, and the private ranges keep
+ * the /24 they get from `networkOf` because that really is one network.
+ */
+export function abuseKeyOf(raw, selfNetwork = null) {
+  const addr = String(raw).trim().replace(/^::ffff:/i, '');
+  if (!addr) return null;
+
+  if (!addr.includes(':')) {
+    /*
+     * Only a real IPv4 address earns its own budget.
+     *
+     * This used to hand back whatever it was given, so `aaaa` and `bbbb` were two networks with
+     * 32 sockets each. Behind Cloudflare that is unreachable, since it writes `CF-Connecting-IP`
+     * itself - but the same limit runs on the self-hosted server, where the address comes from
+     * `X-Forwarded-For` whenever `trustProxy` is on, and that is required behind any reverse
+     * proxy. The header is whatever the client typed, so the limit could be stepped over by
+     * sending a different piece of nonsense per connection.
+     *
+     * Returning null collapses every unreadable address into the one `unknown` bucket at the
+     * call site, so junk competes with junk for a single budget rather than minting budgets.
+     */
+    if (!/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(addr)) return null;
+    if (addr.split('.').some((o) => Number(o) > 255)) return null;
+    return networkOf(addr, selfNetwork);
+  }
+
+  if (addr === '::1') return networkOf(addr, selfNetwork);
+
+  const full = expandV6(addr.toLowerCase());
+  // `expandV6` returns null for anything malformed, and that is the same answer as above.
+  return full ? full.slice(0, 3).join(':') + '::/48' : null;
+}
