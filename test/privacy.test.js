@@ -79,7 +79,24 @@ test('a peer on this network never has an address gathered for it, switch or no 
 test('a peer on this network is still direct, because that costs nothing', () => {
   // The point of the design: privacy by default must not mean the common case got slower.
   assert.match(MAIN, /const sameNetwork = localReach\(connId, chan\);/);
-  assert.match(MAIN, /const wantDirect = sameNetwork \|\| allowAddress;/);
+  assert.match(MAIN, /const wantDirect = \(sameNetwork \|\| allowAddress\) && canDirect;/);
+});
+
+test('and nothing is direct in a browser that has no way to be', () => {
+  /*
+   * Tor Browser removes `RTCPeerConnection`, which is the right thing for it to do: a peer
+   * connection is a hole punched straight through the circuit. Without this the same-network
+   * branch could still ask for a direct transport - two people behind one exit share a network
+   * label - and construct a class that is not there.
+   *
+   * Asserted apart from the line above so that changing either one fails on its own terms.
+   */
+  assert.match(MAIN, /const canDirect = platform\(\)\.webrtc;/, 'the direct path no longer checks that it can exist');
+  assert.match(
+    MAIN,
+    /const transport = wantDirect \? new Transport\(session, \{ iceConfig \}\) : new RelayTransport\(session\);/,
+    'the relay is no longer the answer when direct is refused',
+  );
 });
 
 test('same network means met there, or known to also be there', () => {

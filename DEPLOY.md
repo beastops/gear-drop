@@ -223,3 +223,57 @@ on your relay. A client that sends no `Origin` at all is not a browser and is le
 `GD_RELAY` does double duty: it writes the relay address into the page *and* narrows that
 page's `connect-src` to exactly that origin, so injected script could not open a socket
 somewhere else.
+
+## Behind an onion service (the anonymous one)
+
+Every option above hides what you send. None of them hides *that you sent it*, or to whom: the
+host and the relay both see an address, because a connection has to come from somewhere.
+
+An onion service is the one arrangement where they do not. Tor hands them a circuit instead of an
+address, so there is nothing to log, no location to infer from it, and no way to tell that two
+particular people are the two ends of one transfer. That is Tor's guarantee, not this app's — but
+it only holds if the app does nothing to spoil it, and the app is built so it does not.
+
+**Why this works here and not with most web apps**
+
+- **Nothing is fetched from anywhere else.** No CDN, no fonts, no analytics, no third-party
+  origin of any kind, so there is no request that escapes the circuit.
+- **No WebRTC is needed.** Tor Browser removes `RTCPeerConnection`, and rightly — a peer
+  connection is a hole punched straight through the circuit you just built. Gear Drop treats a
+  browser without it as a relay-only browser rather than a broken one: the handshake runs over
+  the rendezvous socket and so does the file, sealed end to end exactly as everywhere else.
+- **No address is ever gathered.** No STUN server is configured by default, and none is contacted
+  unless somebody turns on direct connections, which Tor Browser cannot do anyway.
+- **It still works offline.** After the first load the service worker serves everything from
+  disk, so the circuit carries a transfer and nothing else.
+
+**Running one**
+
+Put Tor in front of whatever you already have — the single-service option above is the simplest,
+since the app and the relay then share one origin and one hostname.
+
+```
+# /etc/tor/torrc
+HiddenServiceDir /var/lib/tor/geardrop/
+HiddenServicePort 80 127.0.0.1:3000
+```
+
+```bash
+sudo systemctl restart tor
+sudo cat /var/lib/tor/geardrop/hostname    # your .onion address
+```
+
+That is the whole deployment. It needs no domain, no certificate and no open inbound port —
+which also means it runs from a machine at home without exposing that machine to anything.
+
+**What to know before you rely on it**
+
+- Open it in **Tor Browser**, at its security level *Standard* or *Safer*. At *Safest* JavaScript
+  is off and no web app runs at all.
+- `.onion` is a secure context, so WebCrypto, the service worker and storage all work.
+- Everything goes over the relay path, so it is as fast as the circuit and no faster. This is the
+  trade: anonymity costs throughput, and there is no arrangement where it does not.
+- Both ends have to be on the same onion for the two of them to find each other.
+- The relay still sees that one circuit forwards to a tag another circuit is subscribed to. It
+  cannot read any of it, and a circuit is not a person — but if you want that link gone too, the
+  answer is a mixnet, and this is not one.

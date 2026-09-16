@@ -790,11 +790,16 @@ function applyPlatform() {
   const p = platform();
   document.body.classList.toggle('no-folders', !p.folders);
   document.body.classList.toggle('no-drag', !p.dragAndDrop);
-  if (!p.webrtc) {
-    toast(t('toast.noWebrtc'), 'bad', {
-      hold: 60_000,
-    });
-  }
+  /*
+   * No WebRTC is a mode, not a failure.
+   *
+   * This used to be a red notice, held for a minute, saying files could not be sent device to
+   * device - which on Tor Browser told the person who had gone to the most trouble to be
+   * private that they were the one person who could not use this. They can: every transfer
+   * takes the relay path, sealed end to end exactly as it is everywhere else, and nothing about
+   * where they are is ever gathered because no candidate is ever collected.
+   */
+  if (!p.webrtc) toast(t('toast.relayOnly'), '', { hold: 12_000 });
 }
 
 /* ────────────────────────────── connections ───────────────────────────── */
@@ -845,7 +850,21 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
      */
     const sameNetwork = localReach(connId, chan);
     const allowAddress = app.prefs.direct === true;
-    const wantDirect = sameNetwork || allowAddress;
+    /*
+     * And there has to be a WebRTC to be direct with.
+     *
+     * Tor Browser removes `RTCPeerConnection` outright, which is the correct thing for it to do
+     * - a peer connection is a hole punched straight through the circuit you went to the
+     * trouble of building. Without this check `sameNetwork` could still come out true, since two
+     * people behind one exit share a network label, and the line below would construct a class
+     * the browser does not have.
+     *
+     * The relay path needs none of it: the handshake runs over the rendezvous socket and so does
+     * the file. So a browser with no WebRTC is not a browser that cannot send - it is a browser
+     * that is always on the path this app already treats as the private one.
+     */
+    const canDirect = platform().webrtc;
+    const wantDirect = (sameNetwork || allowAddress) && canDirect;
 
     // No ICE servers unless an address was asked for. A candidate that is never gathered
     // cannot be sent, so this is the difference rather than a filter applied afterwards.
