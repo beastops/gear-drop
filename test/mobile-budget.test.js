@@ -45,7 +45,7 @@ const css = read('web', 'app.css');
  * written to catch. Nested braces have to be counted.
  */
 function touchBlocks(source) {
-  const needle = '@media (hover: none) and (pointer: coarse)';
+  const needle = '@media (pointer: coarse)';
   const out = [];
   for (let i = source.indexOf(needle); i !== -1; i = source.indexOf(needle, i + 1)) {
     const open = source.indexOf('{', i);

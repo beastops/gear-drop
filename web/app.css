@@ -3778,7 +3778,7 @@ body.theme-light .about-body {
 /* ── phones ─────────────────────────────────────────────────────────────── */
 
 .mobile-only { display: none; }
-@media (hover: none) and (pointer: coarse) {
+@media (pointer: coarse) {
   .desktop-only { display: none; }
   .mobile-only { display: inline; }
   /*
@@ -4422,7 +4422,7 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
  * class selector is decided on source order alone, and both of these classes are given
  * their size further up the file. Sitting anywhere above them, this rule loses silently.
  */
-@media (hover: none) and (pointer: coarse) {
+@media (pointer: coarse) {
   /*
    * Safari zooms in when a field smaller than 16px takes focus, and does not zoom back out
    * when it loses it, so the app is left sitting crooked until the page is reloaded. The
@@ -4469,7 +4469,7 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
  * So the materials thin out on touch. They are still glass; they are glass a phone can hold
  * for an hour without getting warm.
  */
-@media (hover: none) and (pointer: coarse) {
+@media (pointer: coarse) {
   :root {
     --mat-thin: blur(6px) saturate(150%);
     --mat-regular: blur(10px) saturate(160%);
@@ -4511,7 +4511,7 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
  * missing, and the one it switches to while a sheet is being dragged. Using it here is not a
  * downgrade nobody chose; it is the same surface, arrived at from the other direction.
  */
-@media (hover: none) and (pointer: coarse) {
+@media (pointer: coarse) {
   .sheet-body,
   .about-body,
   .menu,
@@ -4559,13 +4559,13 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
    * its close button is the only way out and stays. Hidden rather than removed, and brought
    * back by `:focus-visible`, so a switch, a keyboard or a screen reader still finds it.
    */
-  dialog:not([data-no-swipe]) .close-x[data-close],
-  dialog:not([data-no-swipe]) .about-close[data-close] {
+  dialog:not([data-no-swipe]):not(.scrolls) .close-x[data-close],
+  dialog:not([data-no-swipe]):not(.scrolls) .about-close[data-close] {
     opacity: 0;
     pointer-events: none;
   }
-  dialog:not([data-no-swipe]) .close-x[data-close]:focus-visible,
-  dialog:not([data-no-swipe]) .about-close[data-close]:focus-visible {
+  dialog:not([data-no-swipe]):not(.scrolls) .close-x[data-close]:focus-visible,
+  dialog:not([data-no-swipe]):not(.scrolls) .about-close[data-close]:focus-visible {
     opacity: 1;
     pointer-events: auto;
   }
@@ -4574,4 +4574,13 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
   dialog:not([data-no-swipe]) .sheet-body > h2 {
     padding-right: 0;
   }
+}
+
+/* Quiet enough to ignore, present enough to read out when something is not adding up. */
+.about-build {
+  margin-top: -4px;
+  font-size: 11px;
+  font-family: var(--mono);
+  opacity: 0.45;
+  letter-spacing: 0.02em;
 }

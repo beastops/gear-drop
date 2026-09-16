@@ -859,6 +859,15 @@
       <path d="M12 3.1c3.75 4.3 6.25 7.75 6.25 10.6a6.25 6.25 0 0 1-12.5 0C5.75 10.85 8.25 7.4 12 3.1z M12 11.3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" fill="currentColor" fill-rule="evenodd"/>
     </svg>
     <div class="about-name">Gear Drop <sup id="about-version">v0.7</sup></div>
+    <!--
+      Which build this actually is.
+
+      The version above is the product's and moves rarely. This one changes every release,
+      so somebody looking at a screen can say whether they are on the build that was just
+      deployed or a copy their browser kept - a question that came up three times before
+      anything here could answer it.
+    -->
+    <div class="about-build" id="about-build" hidden></div>
     <p class="about-tag" data-i18n="about.tag">The relay can’t read your files, pretend to be one of your devices, or recognise you from one visit to the next.</p>
 
     <div class="about-links">
