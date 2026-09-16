@@ -45,13 +45,20 @@ can't find each other on their own. Here is honestly what it gets.
 
 | It can see | It cannot see |
 |---|---|
-| That some device connected, and from which address — like any website | Your files. They never go through it |
-| Roughly when two devices talk to each other | File names, sizes, or your messages — all encrypted before they leave |
-| Nothing else. It stores none of it | Enough to pretend to be one of your devices, or to recognise you from one visit to the next |
+| That a device connected, and from which address, like any website | Your files. On the normal path they never go through it at all |
+| Roughly when two devices talked to each other | How many files, what they are called, how big they are, or anything in them |
+| On the fallback path, roughly how much moved, rounded to a bucket | Who you are, or which device is which |
+| Nothing else, and it stores none of it | Enough to pretend to be one of your devices, or to recognise you next visit |
 
-If a network blocks a direct connection, the app offers to route the data through that same
-server instead. It still only ever handles sealed bytes. It asks you first, every time, and
-switches back to the direct path as soon as one is available.
+If a network blocks a direct connection, the app offers to carry the data through that same
+server instead. It asks first, every time, and switches back to the direct path as soon as one is
+available. On that path every frame is sealed twice, header included, so what the relay handles
+is a type byte, a counter and bytes. When the transfer goes quiet the connection tops itself up
+to a bucket, so the byte count does not answer the question either.
+
+None of this has to be taken on trust. It is a few hundred lines with no build step, the relay is
+one file, and `docs/` has the wire format in enough detail to write another client and check this
+against it.
 
 ## On a phone
 
