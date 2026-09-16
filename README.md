@@ -55,11 +55,13 @@ switches back to the direct path as soon as one is available.
 
 ## On a phone
 
-<img src="docs/img/phone.png" width="300" align="right" alt="Gear Drop on a phone">
-
 It's the same app, and it's built to feel like a phone app rather than a website squeezed into
 one: sheets you swipe away, a list that carries momentum when you flick it, and no animation
 your phone has to get warm to draw.
+
+<div align="center">
+  <img src="docs/img/phone.png" width="280" alt="Gear Drop on a phone: a file ready to send, and a laptop found on the same network">
+</div>
 
 | | |
 |---|---|
@@ -68,8 +70,6 @@ your phone has to get warm to draw.
 | **Desktop** | Everything, plus writing straight to disk on Chromium |
 | **Older browsers** | Plainer motion, solid panels. Nothing missing |
 | **Private mode** | Works and transfers, and says once that it can't remember pairings |
-
-<br clear="right">
 
 ## How it works
 
