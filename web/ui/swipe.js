@@ -22,6 +22,12 @@
  * input is coarse: on a desktop a drag across a dialog is not a gesture anyone means and it
  * would fight text selection, so the close button and Escape are the ways out there. The
  * check is live, so a tablet that gains a trackpad stops offering it.
+ *
+ * A sheet needs more than this, because it has to share the gesture with its own scrolling, and
+ * sharing is not something the browser will do: `touch-action` decides on the first move, and
+ * whatever it decides is final. So `enableSwipeToDismiss` below does not use the engine here -
+ * it takes the scrolling too, and drives both from one gesture. A banner has nothing to share
+ * with and still does.
  */
 
 const coarse = matchMedia('(pointer: coarse)');
@@ -42,6 +48,20 @@ const DISMISS_VELOCITY = 0.5;
 const VELOCITY_WINDOW_MS = 90;
 /** Movement against the gesture is damped by this much rather than being refused outright. */
 const RUBBER = 6;
+
+/**
+ * How much of its speed a flung list keeps, per millisecond.
+ *
+ * The browser is not scrolling the panel any more - it cannot, or it would claim the drag - so
+ * the momentum after a flick has to come from here. 0.998 per millisecond is about 0.97 a
+ * frame, which is close to what iOS does: far enough to feel thrown, short enough that it
+ * stops roughly where you expected it to.
+ */
+const FLING_FRICTION = 0.998;
+/** Below this, in px per ms, the list has stopped and the frame loop should stop with it. */
+const FLING_FLOOR = 0.02;
+/** A release has to beat this, in px per ms, to be a throw rather than the end of a drag. */
+const FLING_MIN = 0.12;
 
 /** A sheet is tall, so it asks for a real pull. The backdrop is clear by `FADE_OVER`. */
 const SHEET_DISTANCE = 104;
@@ -81,7 +101,6 @@ function swallowNextClick() {
  * @param {Function} o.restore      it did not: put it back
  * @param {Function} [o.canStart]   refuse the gesture before it arms
  * @param {Function} [o.onGrab]     it became a drag
- * @param {boolean}  [o.holdSelection] stop the page selecting text under the finger
  */
 function dragToDismiss(el, o) {
   let pointerId = null;
@@ -122,17 +141,15 @@ function dragToDismiss(el, o) {
   };
 
   /*
-   * The only listener that can stop the browser scrolling instead.
+   * Stop the page scrolling under a banner that is being flicked away.
    *
    * `preventDefault()` on `pointermove` is ignored once `touch-action` has permitted the pan -
-   * by then the scroll belongs to the browser, and the drag below never sees a move. A
+   * by then the scroll belongs to the browser and this would never see another move. A
    * non-passive `touchmove` is the one place the decision is still open, and it has to be made
    * on the first move.
    *
-   * It only refuses what the gesture would take anyway: one finger, past the slop, travelling
-   * the way this thing dismisses, and only when `canStart` already said yes - which for a sheet
-   * means the scroller is at its top. Anywhere else this does nothing and the browser scrolls,
-   * which is the behaviour every sheet on a phone has.
+   * It refuses only what the gesture would take anyway: one finger, past the slop, travelling
+   * the way this thing dismisses. Anything else is left alone and the page scrolls normally.
    */
   el.addEventListener(
     'touchmove',
@@ -183,7 +200,6 @@ function dragToDismiss(el, o) {
       }
       el.classList.add('dragging');
       el.style.transition = 'none';
-      if (o.holdSelection) document.body.style.setProperty('user-select', 'none');
       o.onGrab?.();
     }
 
@@ -208,7 +224,6 @@ function dragToDismiss(el, o) {
     if (!dragging) return;
     dragging = false;
     stopFrame();
-    if (o.holdSelection) document.body.style.removeProperty('user-select');
     el.classList.remove('dragging');
     swallowNextClick();
 
@@ -271,51 +286,338 @@ export function enableSwipeUpToDismiss(el, { onDismiss, onGrab, onLetGo } = {}) 
   });
 }
 
-/** Swipe a sheet down to dismiss it. */
+/**
+ * Swipe a sheet down to dismiss it - and, because it has to, scroll it as well.
+ *
+ * A sheet cannot let the browser scroll it and still expect to be draggable: `touch-action`
+ * hands the whole gesture to one side or the other on the first move. So this takes both. Each
+ * scroller inside the sheet is marked `touch-action: none` when the sheet is bound, nothing is
+ * ever claimed out from under the finger, and this decides - per gesture, and again mid-gesture
+ * - whether the finger is moving the list or the sheet.
+ */
 export function enableSwipeToDismiss(dialog) {
   if (!dialog || dialog.dataset.swipeBound) return;
   dialog.dataset.swipeBound = '1';
 
   /**
-   * True when nothing between the target and the sheet is scrolled away from its top. This is
-   * what stops a downward flick inside a long file list from throwing the sheet off screen
-   * instead of scrolling back to the first row.
+   * Does this element scroll? If it does, take the scrolling off the browser. Asked once per
+   * element and remembered either way, since being a scroll container is a fact about an
+   * element's styles rather than its size - it cannot go stale as content arrives, and the
+   * cache is what lets the question be asked again cheaply for elements that did not exist
+   * when the sheet was bound.
    */
-  const atScrollTop = (target) => {
-    for (let el = target; el && el !== dialog; el = el.parentElement) {
-      if (el.scrollHeight <= el.clientHeight + 1) continue;
-      const overflow = getComputedStyle(el).overflowY;
-      if (overflow !== 'auto' && overflow !== 'scroll') continue;
-      if (el.scrollTop > 0) return false;
+  const claim = (el) => {
+    if (el.dataset.gdScroll === undefined) {
+      const scrolls =
+        !el.matches('input, textarea, select, [contenteditable]') &&
+        ['auto', 'scroll'].includes(getComputedStyle(el).overflowY);
+      el.dataset.gdScroll = scrolls ? '1' : '0';
+      // CSSOM, not a style attribute: the Trusted Types policy refuses the second.
+      if (scrolls) el.style.setProperty('touch-action', 'none');
     }
-    return true;
+    return el.dataset.gdScroll === '1';
   };
 
-  const gesture = dragToDismiss(dialog, {
-    sign: 1,
-    distance: SHEET_DISTANCE,
-    flickTravel: SHEET_FLICK_TRAVEL,
-    holdSelection: true,
-    // A text field owns its own drag: selecting inside it is not a dismissal.
-    canStart: (e) => !e.target.closest?.('input, textarea, select, [contenteditable]') && atScrollTop(e.target),
-    paint: (offset) => {
+  /*
+   * Everything that is already here, up front, so the browser never gets to claim a pan.
+   *
+   * Done from here rather than in the stylesheet for two reasons. A list of class names in CSS
+   * goes stale the moment somebody adds a scrolling region and forgets to add it there, whereas
+   * this asks the question directly. And if this module ever fails to load, nothing has been
+   * taken: the scrollers keep `touch-action: auto`, the browser scrolls them as it always did,
+   * and the sheet is merely not draggable rather than not scrollable.
+   *
+   * The dialog itself is left out even if it scrolls. `touch-action` is answered by the whole
+   * ancestor chain, so `none` there would reach every descendant - including the text fields,
+   * whose panning is their own and not ours to take.
+   */
+  for (const el of dialog.querySelectorAll('*')) claim(el);
+
+  /* ---------------------------------------------------------------- state */
+
+  let pointerId = null;
+  let mode = 'idle'; // idle -> deciding -> scroll | dismiss
+  let scroller = null; // the list under the finger, whichever one that is
+  let smoothed = null; // a scroller whose `scroll-behavior` we are holding down
+  let startX = 0;
+  let startY = 0;
+  let scrollFrom = 0; // where the list was when the gesture began
+  let maxScroll = 0; // measured once, so no move handler reads layout
+  let scrollTo = 0; // where the list should be on the next frame
+  let offset = 0; // how far the sheet has been pulled
+  let samples = [];
+  let frame = 0;
+  let fling = 0;
+
+  const stopFrame = () => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+  };
+  const stopFling = () => {
+    if (fling) cancelAnimationFrame(fling);
+    fling = 0;
+  };
+
+  /**
+   * The nearest thing under the finger that can actually scroll.
+   *
+   * A sheet can hold more than one - the chat log inside the chat sheet, the language list
+   * inside Settings - and the one being touched is the one that should move. Asked per touch
+   * rather than resolved once, because the deepest of them arrive later than the sheet does: a
+   * received message long enough to scroll is built when it is received, and a list of scrollers
+   * taken at startup would leave it stuck.
+   */
+  const scrollerUnder = (target) => {
+    for (let el = target; el && el !== dialog; el = el.parentElement) {
+      if (claim(el) && el.scrollHeight > el.clientHeight + 1) return el;
+    }
+    return null;
+  };
+
+  /**
+   * One write per frame, whatever the digitizer did.
+   *
+   * A touch screen reports two or three times per displayed frame, and a style written on each
+   * of those is work the compositor throws away. The events move numbers; this moves pixels.
+   */
+  const paint = () => {
+    frame = 0;
+    if (mode === 'dismiss') {
       dialog.style.translate = `0 ${offset.toFixed(1)}px`;
       dialog.style.setProperty('--drag', Math.min(1, Math.max(0, offset) / FADE_OVER).toFixed(3));
-    },
-    dismiss: () => leave(),
-    restore: () => {
+    } else if (mode === 'scroll' && scroller) {
+      scroller.scrollTop = scrollTo;
+    }
+  };
+  const schedulePaint = () => {
+    if (!frame) frame = requestAnimationFrame(paint);
+  };
+
+  /** Keep the tail of the gesture, and drop anything older than the window. */
+  const sample = (e) => {
+    // Every sample the browser captured, including the ones coalesced into this event: the
+    // paint is throttled to the frame, the measurement is not. An empty list is still a list,
+    // so `||` never fires on it; ask for the length instead.
+    const coalesced = e.getCoalescedEvents?.();
+    const points = coalesced && coalesced.length ? coalesced : [e];
+    for (const p of points) samples.push({ t: p.timeStamp || e.timeStamp, y: p.clientY });
+    while (samples.length > 2 && e.timeStamp - samples[0].t > VELOCITY_WINDOW_MS) samples.shift();
+  };
+
+  /** Average speed over the tail of the gesture, in px per ms. Downward is positive. */
+  const velocity = () => {
+    if (samples.length < 2) return 0;
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const dt = last.t - first.t;
+    return dt > 8 ? (last.y - first.y) / dt : 0;
+  };
+
+  /** Give a list its smooth scrolling back; a drag has to be exactly where the finger is. */
+  const freeScroller = () => {
+    smoothed?.style.removeProperty('scroll-behavior');
+    smoothed = null;
+  };
+
+  /** Carry a flicked list on after the finger has gone, since nothing else will. */
+  const throwList = (speed) => {
+    if (!scroller || Math.abs(speed) < FLING_MIN) {
+      freeScroller();
+      return;
+    }
+    const list = scroller;
+    let v = speed;
+    let pos = scrollTo;
+    let last = performance.now();
+    const step = (now) => {
+      // Clamped: a frame the page was not given - a background tab, a long task - must not
+      // teleport the list by however long it was away.
+      const dt = Math.min(32, now - last);
+      last = now;
+      v *= Math.pow(FLING_FRICTION, dt);
+      const next = Math.max(0, Math.min(maxScroll, pos - v * dt));
+      const stuck = next === pos;
+      pos = next;
+      list.scrollTop = pos;
+      if (Math.abs(v) > FLING_FLOOR && !stuck) {
+        fling = requestAnimationFrame(step);
+      } else {
+        fling = 0;
+        freeScroller();
+      }
+    };
+    fling = requestAnimationFrame(step);
+  };
+
+  /* -------------------------------------------------------------- gesture */
+
+  /** The finger is now moving the sheet rather than the list. */
+  const takeSheet = (e) => {
+    mode = 'dismiss';
+    startY = e.clientY;
+    offset = 0;
+    dialog.classList.add('dragging');
+    dialog.style.transition = 'none';
+  };
+
+  /** And back: the list comes with the finger again. */
+  const giveBackList = (e) => {
+    mode = 'scroll';
+    startY = e.clientY;
+    scrollFrom = 0;
+    scrollTo = 0;
+    offset = 0;
+    dialog.classList.remove('dragging');
+    dialog.style.translate = '';
+    dialog.style.setProperty('--drag', '0');
+  };
+
+  dialog.addEventListener('pointerdown', (e) => {
+    if (!touchInput) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // A text field owns its own drag: selecting inside it is not a dismissal.
+    if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+
+    stopFling();
+    freeScroller();
+
+    pointerId = e.pointerId;
+    mode = 'deciding';
+    startX = e.clientX;
+    startY = e.clientY;
+    offset = 0;
+    scroller = scrollerUnder(e.target);
+    scrollFrom = scroller ? scroller.scrollTop : 0;
+    scrollTo = scrollFrom;
+    // Read once. Every later handler works from this, so no move ever measures anything.
+    maxScroll = scroller ? scroller.scrollHeight - scroller.clientHeight : 0;
+    samples = [{ t: e.timeStamp, y: e.clientY }];
+
+    if (scroller) {
+      // A log that scrolls smoothly on its own is right when it is following a new message and
+      // wrong when it is following a finger: an animated `scrollTop` would lag behind the touch
+      // by however long the animation takes.
+      smoothed = scroller;
+      scroller.style.setProperty('scroll-behavior', 'auto');
+    }
+    // Promoted now rather than when the drag starts. Asking for the layer at the moment of the
+    // first movement means the first frame of the drag pays for the promotion.
+    dialog.style.setProperty('will-change', 'translate');
+  });
+
+  dialog.addEventListener('pointermove', (e) => {
+    if (mode === 'idle' || e.pointerId !== pointerId) return;
+
+    if (mode === 'deciding') {
+      const dy = e.clientY - startY;
+      if (Math.abs(dy) < SLOP) {
+        sample(e);
+        return;
+      }
+      // Sideways is somebody else's gesture, or nobody's.
+      if (Math.abs(e.clientX - startX) > Math.abs(dy)) {
+        mode = 'idle';
+        pointerId = null;
+        dialog.style.removeProperty('will-change');
+        freeScroller();
+        return;
+      }
+      // Throws if the finger lifted between the browser queueing this move and it running.
+      // Unguarded, that would abort the rest of the block and leave the gesture half set up.
+      try {
+        dialog.setPointerCapture?.(pointerId);
+      } catch {
+        /* nothing left to capture */
+      }
+      document.body.style.setProperty('user-select', 'none');
+      // Pulling down with nothing above to scroll into view is the sheet. Everything else is
+      // the list. That is the whole rule, and it is the one every sheet on a phone uses.
+      if (dy > 0 && scrollFrom <= 0) takeSheet(e);
+      else mode = 'scroll';
+    }
+
+    if (mode === 'scroll') {
+      const want = scrollFrom - (e.clientY - startY);
+      /*
+       * Running out of list mid-gesture hands the rest of the pull to the sheet.
+       *
+       * Without this, scrolling to the top and carrying on pulling does nothing until you lift
+       * your finger and start again - and that is the exact moment every other sheet on a phone
+       * starts to move.
+       */
+      if (want < 0) {
+        scrollTo = 0;
+        if (scroller) scroller.scrollTop = 0;
+        takeSheet(e);
+      } else {
+        scrollTo = Math.min(maxScroll, want);
+      }
+    }
+
+    if (mode === 'dismiss') {
+      const pulled = e.clientY - startY;
+      // Pushing back up out of a pull puts the list under the finger again, rather than
+      // stopping dead at the top of a sheet that has not gone anywhere.
+      if (pulled < 0 && maxScroll > 0) giveBackList(e);
+      // Otherwise: against the way it travels, resisted rather than refused.
+      else offset = pulled < 0 ? pulled / RUBBER : pulled;
+    }
+
+    sample(e);
+    schedulePaint();
+    // Nothing was going to scroll on its own - the scrollers are ours - but a pen or a mouse
+    // drag would still be starting a text selection.
+    if (e.cancelable) e.preventDefault();
+  });
+
+  const release = (e) => {
+    if (e.pointerId !== pointerId) return;
+    const was = mode;
+    const speed = velocity();
+    mode = 'idle';
+    pointerId = null;
+    stopFrame();
+    dialog.style.removeProperty('will-change');
+
+    // Never past the slop: a tap, and a tap must reach whatever it was aimed at.
+    if (was === 'deciding') {
+      freeScroller();
+      return;
+    }
+
+    document.body.style.removeProperty('user-select');
+    // Whichever way it went, this was a drag, and the click it began as is not meant.
+    swallowNextClick();
+
+    if (was === 'scroll') {
+      if (scroller) scroller.scrollTop = scrollTo;
+      throwList(speed);
+      return;
+    }
+
+    freeScroller();
+    dialog.classList.remove('dragging');
+    // Distance or speed: a short fast flick means the same thing as a long slow pull.
+    if (offset > SHEET_DISTANCE || (offset > SHEET_FLICK_TRAVEL && speed > DISMISS_VELOCITY)) leave();
+    else {
       // Back to rest, on the sheet's own spring.
       dialog.style.transition = '';
       dialog.style.translate = '';
       dialog.style.setProperty('--drag', '0');
-    },
-  });
+    }
+  };
+
+  dialog.addEventListener('pointerup', release);
+  dialog.addEventListener('pointercancel', release);
 
   const reset = () => {
-    gesture.stopFrame();
+    stopFrame();
+    stopFling();
+    freeScroller();
     dialog.classList.remove('dragging');
     dialog.style.transition = '';
     dialog.style.translate = '';
+    dialog.style.removeProperty('will-change');
     dialog.style.removeProperty('--drag');
     document.body.style.removeProperty('user-select');
   };

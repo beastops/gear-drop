@@ -3926,7 +3926,16 @@ body.theme-light .about-body {
     translate: 0 100%;
     scale: 1;
   }
-  .sheet-body { touch-action: pan-y; }
+  /*
+   * Which way a sheet's scrolling goes is no longer the stylesheet's to say.
+   *
+   * `pan-y` here was a promise to the browser that a vertical drag was a scroll, and the
+   * browser kept it: it claimed the gesture on the first move and cancelled the drag. A sheet
+   * that can be dismissed now marks its own scrollers `touch-action: none` from `swipe.js` and
+   * drives both the scroll and the drag itself. One that cannot - the passphrase prompt, the
+   * lock screen - is never bound and keeps the browser's scrolling, which is why this cannot
+   * simply be `none` here.
+   */
   @starting-style {
     dialog.sheet[open] {
       translate: 0 100%;
