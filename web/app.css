@@ -13,9 +13,18 @@
  * when something actually changed.
  */
 
+/*
+ * Registered so it can be animated, and inheriting because it has to travel.
+ *
+ * Script sets `--p` on the tile; the ring that draws it is `.avatar::before`, a pseudo-element
+ * two levels down. A registered property does not inherit unless told to, unlike an ordinary
+ * custom property, so with `inherits: false` the ring read `initial-value` and painted a
+ * perfectly good gradient stopped at zero degrees — for every transfer, while the percentage
+ * beside it counted up correctly. Nothing errored, which is why it lasted.
+ */
 @property --p {
   syntax: '<number>';
-  inherits: false;
+  inherits: true;
   initial-value: 0;
 }
 
