@@ -625,8 +625,6 @@ h1, h2, .empty p, .about-tag, .share-title {
   /* No 300ms wait for a double-tap that is not coming, and no grey flash over the glass. */
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  --gx: 30%;
-  --gy: 0%;
   transition:
     transform var(--spring-snap),
     color var(--t-fast);
@@ -651,7 +649,7 @@ h1, h2, .empty p, .about-tag, .share-title {
   z-index: -1;
   border-radius: inherit;
   background:
-    radial-gradient(34px 22px at var(--gx) var(--gy), rgba(255, 255, 255, var(--spec, 0.18)), transparent 74%),
+    radial-gradient(34px 22px at 30% 0%, rgba(255, 255, 255, var(--spec, 0.18)), transparent 74%),
     var(--fill);
   /*
    * A lit edge and a dark one — not an outline.
@@ -701,16 +699,9 @@ h1, h2, .empty p, .about-tag, .share-title {
 .icon-btn.on::after,
 .icon-btn[aria-pressed='true']::after {
   background:
-    radial-gradient(34px 22px at var(--gx) var(--gy), rgba(255, 255, 255, 0.32), transparent 74%),
+    radial-gradient(34px 22px at 30% 0%, rgba(255, 255, 255, 0.32), transparent 74%),
     var(--accent);
   box-shadow: var(--rim), 0 2px 8px -3px rgba(var(--accent-rgb), 0.55);
-}
-
-/* Chrome will displace the blurred plane; everywhere else keeps the blur and the highlight. */
-@supports (filter: url('#gd-wobble')) {
-  .icon-btn::before {
-    filter: url('#gd-wobble') saturate(125%) brightness(1.08);
-  }
 }
 
 /*
@@ -2434,43 +2425,22 @@ body.theme-light .peer.ready .avatar {
  * bright ring of the radar. That is why it is paired with a highlight rather than relied on.
  */
 /*
- * The lens goes on the primary action and nothing else.
+ * A highlight on the top-left shoulder, where the light is.
  *
- * Apple's guidance on adopting this material is blunt about it: use it sparingly, limit it
- * to the most important functional elements, and do not layer it on top of itself. The
- * point of the material is to draw attention to the content underneath — spread across
- * every button, chip and menu row it stops pointing at anything and becomes the content.
- *
- * So: one refracting element per screen, the thing you actually want pressed. Everything
- * else is an ordinary tinted control, which is also what keeps this cheap.
- */
-@supports (backdrop-filter: url('#gd-lens')) {
-  .cta {
-    backdrop-filter: url('#gd-lens');
-  }
-}
-
-/*
- * The highlight that follows your pointer.
- *
- * On a dark interface this is the cue that actually says "glass" — a wet-looking specular
- * that slides across the surface as you move over it, the way a highlight tracks across a
- * curved object when you move your head. Refraction alone, with a black background to bend,
- * says nothing at all.
- *
- * `--gx`/`--gy` are written by the pointer handler in main.js and default to the top-left
- * shoulder, which is where a light would sit if nobody were pointing at anything.
+ * This used to follow the pointer, which was there to give the refraction something to catch
+ * on a near-black interface. With nothing bending light behind it there is nothing for a
+ * moving highlight to sell, and it cost a document-level pointermove writing custom properties
+ * on every move. Fixed where a light source would sit, it reads the same at rest and behaves
+ * identically on a phone, which never had the hover to drive it anyway.
  */
 .cta,
 .ghost-btn {
-  --gx: 30%;
-  --gy: 0%;
 }
 .cta::before,
 .ghost-btn::before {
   background:
     radial-gradient(
-      120px 70px at var(--gx) var(--gy),
+      120px 70px at 30% 0%,
       rgba(255, 255, 255, var(--glass-spec, 0.3)),
       transparent 70%
     ),
@@ -4333,30 +4303,6 @@ body.theme-light .setting-row {
 }
 
 /*
- * When the layer is live, the CSS glass on the main screen stands down.
- *
- * Two implementations of the same effect painting the same button is the one outcome worse
- * than either alone. Scoped to the header and the stage: a modal dialog renders in the top
- * layer, above any canvas, so buttons inside a sheet keep the CSS version — which is why
- * that version is still worth having and has not been deleted.
- */
-body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn) {
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow: none;
-}
-body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn)::before,
-body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn)::after {
-  display: none;
-}
-/* The focus ring is not decoration and does not stand down with the rest. */
-body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/*
  * The lock screen.
  *
  * One field and one button, because there is nothing else to do here and no way around it.
@@ -4530,12 +4476,11 @@ body.gl-glass :is(header, #stage) :is(.cta, .ghost-btn, .icon-btn):focus-visible
   }
 
   /*
-   * And no refraction on a phone.
+   * And no blur behind the primary button on a phone.
    *
-   * `backdrop-filter: url('#gd-lens')` is a real SVG filter resolving against live pixels,
-   * per button, per frame. Chrome does it and Chrome is what most phones run. Apple's own
-   * guidance for this material says to use it sparingly and not to layer it; a phone GPU is
-   * the case where "sparingly" means "not here".
+   * A backdrop filter is resolved against live pixels every frame, and this button sits over
+   * the radar, which is the one thing on screen that never stops moving. Cheap on a laptop,
+   * and the difference between warm and hot on a phone held for a long transfer.
    *
    * The button goes solid with it. It was translucent so the blurred backdrop could read
    * through; with no blur behind it, translucency is just a washed-out button.

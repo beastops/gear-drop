@@ -35,7 +35,6 @@ const SHELL = [
   'core/relay-transport.js',
   'core/ranges.js',
   'core/ripple.js',
-  'core/glass-gl.js',
   'core/ripple-worker.js',
   'ui/i18n.js',
   'ui/swipe.js',

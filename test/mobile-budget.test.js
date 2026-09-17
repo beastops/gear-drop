@@ -33,7 +33,6 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
 
 const main = read('web', 'main.js');
-const glass = read('web', 'core', 'glass-gl.js');
 const css = read('web', 'app.css');
 
 /**
@@ -104,7 +103,7 @@ test('nothing asks a phone whether it hovers', () => {
   // they replaced, and matching those would be reading prose instead of code.
   const asked = [
     ...[...css.matchAll(/@media\s*\(hover:\s*none\)/g)].map(() => 'app.css'),
-    ...[...(main + ripple + glass).matchAll(/matchMedia\(['"`]\(hover:\s*none\)/g)].map(() => 'a script'),
+    ...[...(main + ripple).matchAll(/matchMedia\(['"`]\(hover:\s*none\)/g)].map(() => 'a script'),
   ];
   assert.deepEqual(asked, [], 'these gate touch behaviour on a query no phone matches');
 });
@@ -121,26 +120,36 @@ test('the radar shades a phone at fewer pixels than a desktop', () => {
 
 /* ------------------------------------------------------------ the shader */
 
-test('the shader only starts on a machine with room to spare', () => {
-  assert.match(main, /matchMedia\('\(hover: hover\) and \(pointer: fine\)'\)/);
-  // And the gate has to stand in front of the mount. Asserting only that both appear nearby
-  // let the gate be deleted while the declaration stayed, which a mutation found.
-  assert.match(
-    main,
-    /roomToSpare && app\.glass\.mount\(\)/,
-    'the WebGL glass mounts without checking what it is running on',
-  );
-});
+test('nothing refracts the whole window, or the pixels behind a button', () => {
+  /*
+   * There was a WebGL layer here that redrew the window every frame, at twice the device's
+   * pixel count, for as long as any control was on screen. Two SVG filters went with it: one
+   * displacing every toolbar button's blurred backdrop, and one resolving a chromatic
+   * refraction against live pixels behind the primary button, per frame.
+   *
+   * Each arrived with a gate, and each gate was added after the thing behind it was caught
+   * costing something - it only started where a pointer could hover, it switched off on touch,
+   * it had to be told to stop behind a modal. Three gates around one effect is the effect
+   * admitting what it costs, so the effect went instead.
+   *
+   * What replaced it is what was doing the work anyway: a blur on the surface and a lit top
+   * edge. This is here because a full-screen refraction pass is exactly the sort of thing that
+   * gets added back by someone who has not held the phone while it ran.
+   */
+  // Read here rather than at module scope, which is how the other tests in this file do it.
+  const ripple = read('web', 'core', 'ripple.js');
+  const html = read('web', 'index.html');
 
-test('the shader stops while something opaque is over it', () => {
-  assert.match(glass, /pause\(\)\s*\{/, 'the layer cannot be told to stop');
-  assert.match(glass, /if \(this\._paused\) return;/, 'it can be told, and ignores it');
-  assert.match(
-    main,
-    /anyOpen\(\)[\s\S]{0,200}?radar\?\.pause\(\)[\s\S]{0,80}?glass\?\.pause\(\)/,
-    'a sheet covers the page and the shader keeps drawing behind it',
-  );
-  assert.match(main, /glass\?\.resume\(\)/, 'it stops and never starts again');
+  assert.ok(!/GlassLayer|glass-gl/.test(main), 'the WebGL glass layer is back');
+  assert.ok(!/getContext\(['"`]webgl/.test(main + ripple), 'something is asking for a WebGL context again');
+
+  for (const filter of ['gd-lens', 'gd-wobble']) {
+    assert.ok(!css.includes(`url('#${filter}')`), `${filter} is being applied again`);
+    assert.ok(!html.includes(`id="${filter}"`), `${filter} is still shipped in the markup`);
+  }
+
+  // The radar is the one thing still drawing continuously, and it is on a worker canvas.
+  assert.match(ripple, /transferControlToOffscreen/, 'the radar moved back onto the main thread');
 });
 
 /* ----------------------------------------------------------- the materials */

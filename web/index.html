@@ -30,7 +30,6 @@
 <link rel="modulepreload" href="core/dust.js">
 <link rel="modulepreload" href="core/filename.js">
 <link rel="modulepreload" href="core/gdcrypto.js">
-<link rel="modulepreload" href="core/glass-gl.js">
 <link rel="modulepreload" href="core/ice.js">
 <link rel="modulepreload" href="core/picker.js">
 <link rel="modulepreload" href="core/platform.js">
@@ -83,41 +82,6 @@
     Published examples of this effect use a displacement scale around 77, which is tuned for
     a 64-pixel tile; at this size that is a smear, so it runs at a fraction of it.
   -->
-  <filter id="gd-wobble" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
-    <feTurbulence type="turbulence" baseFrequency="0.014" numOctaves="2" seed="4" result="noise"/>
-    <feDisplacementMap in="SourceGraphic" in2="noise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
-  </filter>
-
-  <filter id="gd-lens" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
-    <feImage href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='h' x1='0' x2='1' y1='0' y2='0'%3E%3Cstop offset='0' stop-color='rgb(0,0,0)'/%3E%3Cstop offset='0.44' stop-color='rgb(128,0,0)'/%3E%3Cstop offset='0.56' stop-color='rgb(128,0,0)'/%3E%3Cstop offset='1' stop-color='rgb(255,0,0)'/%3E%3C/linearGradient%3E%3ClinearGradient id='v' x1='0' x2='0' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='rgb(0,0,0)'/%3E%3Cstop offset='0.44' stop-color='rgb(0,128,0)'/%3E%3Cstop offset='0.56' stop-color='rgb(0,128,0)'/%3E%3Cstop offset='1' stop-color='rgb(0,255,0)'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' fill='%23000'/%3E%3Crect width='100' height='100' fill='url(%23h)' style='mix-blend-mode:screen'/%3E%3Crect width='100' height='100' fill='url(%23v)' style='mix-blend-mode:screen'/%3E%3C/svg%3E" result="map" preserveAspectRatio="none" x="0" y="0" width="100%" height="100%"/>
-    <feGaussianBlur in="map" stdDeviation="1.2" result="m"/>
-
-    <feDisplacementMap in="SourceGraphic" in2="m" scale="44" xChannelSelector="R" yChannelSelector="G" result="dr"/>
-    <feDisplacementMap in="SourceGraphic" in2="m" scale="52" xChannelSelector="R" yChannelSelector="G" result="dg"/>
-    <feDisplacementMap in="SourceGraphic" in2="m" scale="61" xChannelSelector="R" yChannelSelector="G" result="db"/>
-
-    <feColorMatrix in="dr" type="matrix" result="r"
-      values="1 0 0 0 0
-              0 0 0 0 0
-              0 0 0 0 0
-              0 0 0 1 0"/>
-    <feColorMatrix in="dg" type="matrix" result="g"
-      values="0 0 0 0 0
-              0 1 0 0 0
-              0 0 0 0 0
-              0 0 0 1 0"/>
-    <feColorMatrix in="db" type="matrix" result="b"
-      values="0 0 0 0 0
-              0 0 0 0 0
-              0 0 1 0 0
-              0 0 0 1 0"/>
-
-    <feBlend in="r" in2="g" mode="screen" result="rg"/>
-    <feBlend in="rg" in2="b" mode="screen" result="rgb"/>
-
-    <feGaussianBlur in="rgb" stdDeviation="0.5" result="soft"/>
-    <feColorMatrix in="soft" type="saturate" values="1.6"/>
-  </filter>
 </svg>
 
 <canvas id="radar" aria-hidden="true"></canvas>

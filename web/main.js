@@ -51,7 +51,6 @@ import { drawQR } from './core/qr.js';
 import { filesFromDataTransfer, filesFromInput } from './core/picker.js';
 import { RelayTransport } from './core/relay-transport.js';
 import { Radar } from './core/ripple.js';
-import { GlassLayer } from './core/glass-gl.js';
 import { platform, saveFile } from './core/platform.js';
 import { safeFileName, safePathSegments, riskOf } from './core/filename.js';
 import { Channel } from './core/channel.js';
@@ -365,22 +364,6 @@ async function boot() {
    * that was always there carries on. The class is what switches the two over, so they can
    * never both be painting at once.
    */
-  /*
-   * The shader is for machines with a fan.
-   *
-   * It redraws the whole window every frame for as long as any control is on screen, at twice
-   * the device's pixel count. A laptop does not notice. A phone gets hot holding the app open,
-   * and a hot phone throttles, which makes everything else stutter too - so the cost is not
-   * only the shader, it is every animation after it.
-   *
-   * A pointer that can hover is the honest test for "this is a machine with room to spare".
-   * Everything else gets the CSS glass, which was always there, costs the compositor one blur
-   * instead of a shader per frame, and looks close enough that this is a trade nobody has to
-   * be told about.
-   */
-  const roomToSpare = matchMedia('(hover: hover) and (pointer: fine)').matches;
-  app.glass = new GlassLayer({ readState: () => app.radar.snapshot() });
-  if (roomToSpare && app.glass.mount()) document.body.classList.add('gl-glass');
 
   // Establish the wrapping key before anything reads a secret, so no code path can race
   // ahead and find the vault closed.
@@ -5676,68 +5659,6 @@ function bindUi() {
     resubscribePaired({ force: true }).catch(() => {});
   });
 
-  /*
-   * A specular highlight that follows the pointer across a button.
-   *
-   * On a dark interface this is what reads as glass. Refraction needs something behind it to
-   * bend and this app is close to black, so without a highlight there is nothing to see. A
-   * moving specular is how a curved, wet-looking surface behaves as you move past it.
-   *
-   * One listener for the whole document rather than one per button, coalesced to a frame,
-   * writing two custom properties. Nothing lays out, and nothing paints except the button
-   * already under the cursor.
-   */
-  let glassTarget = null;
-  let glassFrame = 0;
-  let glassPoint = null;
-
-  /** Put the highlight where the surface was touched, in the units the gradient wants. */
-  const glassAt = (btn, e) => {
-    const r = btn.getBoundingClientRect();
-    btn.style.setProperty('--gx', `${((e.clientX - r.left) / r.width) * 100}%`);
-    btn.style.setProperty('--gy', `${((e.clientY - r.top) / r.height) * 100}%`);
-  };
-
-  /*
-   * A finger gets the same response as a cursor, at the moment of contact.
-   *
-   * Hover does not exist on a phone, so without this the highlight sits wherever it was left
-   * and a tap looks like nothing happened to the surface. Moving it to the point of contact
-   * makes the glass feel pressed, and it is the only part of the effect a touch device gets.
-   */
-  addEventListener(
-    'pointerdown',
-    (e) => {
-      const btn = e.target.closest?.('.cta, .ghost-btn, .icon-btn');
-      if (btn) glassAt(btn, e);
-    },
-    { passive: true },
-  );
-  addEventListener(
-    'pointermove',
-    (e) => {
-      if (e.pointerType === 'touch') return; // a finger covers the thing it is pointing at
-      const btn = e.target.closest?.('.cta, .ghost-btn, .icon-btn');
-      if (!btn) {
-        if (glassTarget) {
-          glassTarget.style.removeProperty('--gx');
-          glassTarget.style.removeProperty('--gy');
-          glassTarget = null;
-        }
-        return;
-      }
-      glassTarget = btn;
-      glassPoint = e;
-      if (glassFrame) return;
-      glassFrame = requestAnimationFrame(() => {
-        glassFrame = 0;
-        if (!glassTarget || !glassPoint) return;
-        glassAt(glassTarget, glassPoint);
-      });
-    },
-    { passive: true },
-  );
-
   addEventListener(
     'resize',
     () => {
@@ -5860,13 +5781,10 @@ function watchModals() {
   // conditions go through one function so closing a dialog in a hidden tab cannot wake the
   // radar back up.
   const sync = () => {
-    // Both layers, not just the radar. The glass was still drawing behind every open sheet.
     if (document.hidden || anyOpen()) {
       app.radar?.pause();
-      app.glass?.pause();
     } else {
       app.radar?.resume();
-      app.glass?.resume();
     }
   };
   const observer = new MutationObserver((records) => {
