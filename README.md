@@ -6,9 +6,9 @@
 
 ### Send a file straight from one device to another.<br>Nothing in the middle can read it.
 
-[**Open the app →**](https://gear-drop.vercel.app)
+[**Open the app →**](https://gear-drop.beastops.workers.dev)
 
-[Host your own](DEPLOY.md) · [How it works](#how-it-works) · [What the server sees](#what-the-server-can-and-cannot-see) · [Report a bug](https://github.com/beastops/gear-drop/issues)
+[Host your own](DEPLOY.md) · [How it works](#how-it-works) · [What the server sees](#what-the-server-can-and-cannot-see) · [What your network sees](#what-your-network-can-and-cannot-see) · [Report a bug](https://github.com/beastops/gear-drop/issues)
 
 ![Gear Drop on a laptop: a file ready to send, and two devices found on the same network](docs/img/desktop.png)
 
@@ -59,6 +59,29 @@ to a bucket, so the byte count does not answer the question either.
 None of this has to be taken on trust. It is a few hundred lines with no build step, the relay is
 one file, and `docs/` has the wire format in enough detail to write another client and check this
 against it.
+
+## What your network can and cannot see
+
+The server above is one audience. Your network is the other, and it is the bigger one: your
+Wi-Fi, your ISP, your employer, whoever carries your traffic. They cannot read what is inside
+an encrypted connection — but normally they can still read the *name* of the site you asked
+for, because that name travels in the clear before the encryption starts.
+
+This app is served from a host that encrypts the name too. So a network watching sees a
+connection to a very large content network that an enormous number of sites sit behind, and not
+which of them you opened.
+
+That last part needs one thing from your browser: it has to look up addresses over an encrypted
+connection, or the name leaks in the lookup instead and nothing was gained. Most browsers now do
+this by default in most places — most, not all, so it's worth checking rather than assuming.
+
+What a network can still see either way is the shape of the traffic: that you are online, roughly
+how much moved, and when. No website can hide that from its own end. Hiding it takes Tor, and
+this works over Tor.
+
+> The app is also up at [gear-drop.vercel.app](https://gear-drop.vercel.app), which behaves
+> identically. That address is *not* encrypted on the way out, so a network can see it was
+> opened. Use it if the first one is blocked where you are.
 
 ## On a phone
 
@@ -185,8 +208,9 @@ npm test
 ```
 
 [`DEPLOY.md`](DEPLOY.md) has the rest. It runs on free tiers, and the app and the relay can live
-on different services — Cloudflare Workers or Deno Deploy for the relay, Vercel or any static
-host for the app.
+on different services — Cloudflare Workers or Deno Deploy for the relay, Cloudflare, Vercel or
+any static host for the app. The security headers are generated at build time from one file, so
+they follow the app to whichever host you pick instead of being left behind on the old one.
 
 The wire protocol is written up in full in
 [`docs/`](docs/06-gear-drop-protocol-spec.md), in enough detail to build another client from,
