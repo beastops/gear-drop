@@ -156,6 +156,17 @@ browser runs exactly the files in `web/`. The app's one stated assumption is tha
 the code this origin serves you, and a build pipeline is a place for that to go wrong
 quietly.
 
+**If you ever delete and re-create the repository**, reconnect it. Vercel stores the link by
+the repository's internal id, not its name, so a repository that was deleted and pushed back
+under the same name is a different one as far as Vercel is concerned. Nothing reports this: the
+site stays up on its last build, and `vercel git connect` will tell you it is already connected,
+because the name it compares never changed. Pushes simply stop producing deployments.
+
+```bash
+vercel inspect https://your-app.vercel.app | grep created   # older than your last push?
+vercel git disconnect && vercel git connect                 # a plain connect is not enough
+```
+
 The same build works on **Netlify** (`build: node scripts/build-static.mjs`, publish
 `dist`), **Cloudflare Pages** and **GitHub Pages**.
 
