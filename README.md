@@ -101,7 +101,7 @@ sheets you swipe away, a list that keeps gliding when you flick it, and no anima
 your phone warm.
 
 <div align="center">
-  <img src="docs/img/phone.png" width="280" alt="Gear Drop on a phone: a file ready to send, and a laptop found on the same network">
+  <img src="docs/img/transfer.gif" width="300" alt="A 157 MB file being sent from a phone: the other device appears on its own, the four safety words are confirmed, and the transfer runs to done">
 </div>
 
 | | |
