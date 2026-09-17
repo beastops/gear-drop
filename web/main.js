@@ -2045,8 +2045,8 @@ function toneFor(channels) {
 
 /**
  * A dialog about a device wears that device's colour, so the answer to "who is this
- * from?" is on screen before the text is read. PairDrop fills the whole header with it;
- * two pixels along the top says the same thing without shouting.
+ * from?" is on screen before the text is read. Two pixels along the top says it without
+ * shouting; a whole coloured header says the same thing far too loudly.
  */
 function setRail(dialog, entry) {
   const body = dialog.querySelector('.sheet-body');
@@ -2502,8 +2502,8 @@ function releaseWake() {
  * The tab title is the one that matters and it was missing. If this tab is in the background -
  * which is the whole situation worth designing for, because if you were looking at it you
  * would have seen the sheet open - then the only thing about this app still on screen is its
- * entry in the tab strip, and ours went on saying "Gear Drop" as though nothing had happened.
- * PairDrop retitles theirs to "Message Received" and it is the right call.
+ * entry in the tab strip, and it went on saying "Gear Drop" as though nothing had happened.
+ * Retitling it is what makes the tab strip carry the news.
  *
  * The title is set whether or not system notifications are switched on, because it costs
  * nothing and asks for no permission; the notification itself still respects the setting.
@@ -5377,9 +5377,9 @@ function bindUi() {
   /*
    * The About page opens out of the button you pressed.
    *
-   * A circle grows from the centre of the control until it covers the screen, which is the one
-   * animation PairDrop has that this app did not. It is worth having for a reason beyond
-   * looking good: a full-screen takeover that simply fades in leaves no trace of where it came
+   * A circle grows from the centre of the control until it covers the screen. It is worth
+   * having for a reason beyond looking good: a full-screen takeover that simply fades in
+   * leaves no trace of where it came
    * from, and the way back is a small × in a corner you then have to find. Growing it out of
    * the button says where the page came from and, when it closes the same way, where it went.
    *

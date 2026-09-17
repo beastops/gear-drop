@@ -7,9 +7,9 @@
  *
  * The privacy point: this carries the *same sealed frames* the data channel would have
  * carried. The relay sees AEAD ciphertext and nothing else: no file names, no sizes
- * beyond a padded length, no plaintext. PairDrop's equivalent fallback base64-encodes the
- * file and hands it to the server in the clear, which is why theirs is off by default and
- * ours does not need to be.
+ * beyond a padded length, no plaintext. A fallback that hands the server readable bytes has
+ * to be off by default and asked for each time; this one does not, because there is nothing
+ * in it to read.
  */
 import { concat } from './bytes.js';
 import { aeadKey, hkdf, seal, open } from './gdcrypto.js';

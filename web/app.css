@@ -219,9 +219,17 @@
   --spring-curve: cubic-bezier(0.2, 0.9, 0.24, 1.02);
   --spring-snap-curve: cubic-bezier(0.32, 0.72, 0, 1);
   --spring-soft-curve: cubic-bezier(0.25, 0.85, 0.3, 1);
-  --spring-ms: 787ms;
-  --spring-snap-ms: 409ms;
-  --spring-soft-ms: 499ms;
+  /*
+   * Quick first, springy second.
+   *
+   * These were 787, 409 and 499. Nothing was dropping frames at those values - the app presents
+   * 99 a second through a throttled transfer - but a spring that takes three quarters of a
+   * second is slow however smoothly it runs, and smooth is not the same as fast. The curves are
+   * untouched, so the motion has the same shape and overshoot; there is just less waiting in it.
+   */
+  --spring-ms: 520ms;
+  --spring-snap-ms: 300ms;
+  --spring-soft-ms: 380ms;
 
   /* `--spring` is bouncy, `--spring-snap` is snappy, `--spring-soft` is smooth. */
   --spring: var(--spring-ms) var(--spring-curve);
@@ -241,9 +249,9 @@
   --ease-in: cubic-bezier(0.42, 0, 1, 1);
   --ease: var(--ease-in-out);
 
-  --t: 250ms var(--ease-in-out);
+  --t: 200ms var(--ease-in-out);
   --t-fast: 150ms var(--ease-out);
-  --t-slow: 400ms var(--ease-in-out);
+  --t-slow: 320ms var(--ease-in-out);
 }
 
 @supports (animation-timing-function: linear(0, 1)) {
@@ -1091,7 +1099,7 @@ body.theme-light .peer.ready .avatar {
 .peer.connecting .avatar::before {
   opacity: 1;
   background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 300deg, transparent 360deg);
-  animation: spin 900ms linear infinite;
+  animation: spin 620ms linear infinite;
 }
 @keyframes spin { to { rotate: 360deg; } }
 
@@ -1109,7 +1117,7 @@ body.theme-light .peer.ready .avatar {
   inset: -6px;
   border-radius: 50%;
   border: 2px solid rgb(var(--tone));
-  animation: landed 700ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  animation: landed 500ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
   pointer-events: none;
 }
 @keyframes landed {
@@ -2312,7 +2320,7 @@ body.theme-light .peer.ready .avatar {
   inset-inline-start: -50%;
   background: linear-gradient(100deg, transparent, var(--glass-sheen), transparent);
   rotate: 8deg;
-  transition: translate 640ms var(--ease);
+  transition: translate 440ms var(--ease);
 }
 .cta:hover::after { translate: 400% 0; }
 .cta svg { width: 17px; height: 17px; }
@@ -2373,7 +2381,7 @@ body.theme-light .peer.ready .avatar {
   background: linear-gradient(100deg, transparent, var(--glass-sheen), transparent);
   rotate: 8deg;
   opacity: 0.6;
-  transition: translate 640ms var(--ease);
+  transition: translate 440ms var(--ease);
 }
 .ghost-btn:hover::after { translate: 400% 0; }
 .ghost-btn svg { width: 17px; height: 17px; }
@@ -3455,8 +3463,8 @@ dialog.full {
   /*
    * It opens as a circle out of the button that opened it.
    *
-   * `cubic-bezier(0.77, 0, 0.175, 1)` is easeInOutQuart, and it is the curve PairDrop uses for
-   * exactly this - slow to start, fast through the middle, slow to land. On a shape growing
+   * `cubic-bezier(0.77, 0, 0.175, 1)` is easeInOutQuart - slow to start, fast through the
+   * middle, slow to land, which is the curve this wants. On a shape growing
    * across the whole screen that matters more than it would on a small control: a linear or
    * ease-out expansion looks like a wipe, and this looks like something opening.
    *
@@ -3467,7 +3475,7 @@ dialog.full {
   /*
    * The close is 300ms, not 800.
    *
-   * The reveal takes 800ms to open and those three durations were all set to match it, which
+   * The reveal takes 560ms to open and those three durations were all set to match it, which
    * is wrong for the other direction: the page faded out in 240ms and then went on holding the
    * top layer for another 560 with nothing visible in it. For over half a second after you
    * closed it, it was gone and still in the way.
@@ -3492,7 +3500,7 @@ dialog.full {
  */
 dialog.full[open] {
   opacity: 1;
-  animation: about-reveal 800ms cubic-bezier(0.77, 0, 0.175, 1) both;
+  animation: about-reveal 560ms cubic-bezier(0.77, 0, 0.175, 1) both;
 }
 @keyframes about-reveal {
   from { clip-path: circle(0 at var(--from-x, 50%) var(--from-y, 50%)); }
@@ -3501,8 +3509,8 @@ dialog.full[open] {
 /*
  * The content waits for the circle.
  *
- * PairDrop delays the About page's contents by exactly the length of the reveal's opening
- * movement - `opacity 300ms ease 300ms` - and the delay is the whole trick. Without it the
+ * The contents are delayed by exactly the length of the reveal's opening movement, and the
+ * delay is the whole trick. Without it the
  * text is already there inside a circle that is still growing, so you see the shape pass over
  * words instead of the shape bringing them with it. With it, the circle opens onto an empty
  * field and the page arrives a beat later, which is the order those two things have to happen
@@ -3702,12 +3710,12 @@ body.theme-light .about-body {
   font-size: 14px;
   box-shadow: var(--shadow-pop);
   /*
-   * Two properties, two speeds - which is how PairDrop animates theirs, and it is right.
+   * Two properties, two speeds.
    *
    * A toast that fades and slides on one clock arrives as a single blur of movement. Bringing
    * the opacity in faster than the travel means it is already legible while it is still
    * settling, so the words are readable for the whole of the animation rather than the end
-   * of it. Their numbers exactly: 200ms on the fade, 300ms ease-out on the movement.
+   * of it. 200ms on the fade, 300ms ease-out on the movement.
    */
   animation:
     toast-fade 200ms var(--ease-out) both,

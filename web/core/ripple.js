@@ -16,11 +16,9 @@ import { scriptURL } from './tt.js';
 /*
  * How many rings fit inside `reach`, which sets how far apart they sit.
  *
- * Measured against PairDrop at the same window size: their rings are about 67 pixels apart
- * and roughly eight of them stand above the beacon. At nine, ours were 97 apart and five were
- * visible: the same idea at half the density, which reads as a few stray arcs rather than a
- * field of rings going out from a point. Thirteen puts the spacing at 67 and the count at
- * nine.
+ * At nine rings they sat 97 pixels apart and only five stood above the beacon, which reads as
+ * a few stray arcs rather than a field going out from a point. Thirteen brings the spacing to
+ * 67 and puts nine of them above the beacon, which is the density the idea needs.
  */
 const RING_COUNT = 13;
 
