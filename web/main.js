@@ -776,8 +776,14 @@ const hostOf = (url) => {
 /** Hide what this browser cannot do, rather than offering it and failing quietly. */
 function applyPlatform() {
   const p = platform();
-  document.body.classList.toggle('no-folders', !p.folders);
-  document.body.classList.toggle('no-drag', !p.dragAndDrop);
+  /*
+   * Folders and drag used to be gated from here, by putting `no-folders` and `no-drag` on the
+   * body for the stylesheet to act on. Nothing ever carried the classes that stylesheet was
+   * hiding, and both capabilities are handled properly elsewhere: the folder entry is not built
+   * when the platform cannot deliver one, and the drop hint is a `.desktop-only` span. A second
+   * answer that does nothing, sitting beside a working one, is worse than no answer - it is the
+   * one a reader finds first.
+   */
   /*
    * No WebRTC is a mode, not a failure.
    *

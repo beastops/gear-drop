@@ -4026,12 +4026,6 @@ body.dragging::after {
 }
 
 
-/* Controls for things this browser cannot do are removed, not disabled — a dead control is
-   worse than an absent one because it implies the feature exists and is broken. */
-body.no-folders .folders-only { display: none !important; }
-body.no-drag .drag-only { display: none !important; }
-
-
 /* A file that runs when it is opened says so where the decision is made, not afterwards. */
 .warn-note {
   margin: 0;
