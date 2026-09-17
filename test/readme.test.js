@@ -80,17 +80,15 @@ test('the images the README shows are really there', () => {
   assert.deepEqual(broken, [], 'the README shows images that are not in the repository');
 });
 
-test('the app it tells people to open is the one this repo actually deploys', () => {
+test('the app it tells people to open is one this repo actually deploys', () => {
   /*
    * The headline link is the most consequential line in the file: it is where a stranger who
-   * reads nothing else ends up. Two hosts serve this app and they are not equivalent — the
-   * Cloudflare Worker encrypts the name of the site on the way out, and the other address does
-   * not. A link that drifts to the weaker one hands the least private address to exactly the
-   * audience that came here for the opposite.
+   * reads nothing else ends up. It has to be one of the two addresses this project really
+   * serves, never a third that drifted in from somewhere.
    *
-   * Checked against `wrangler.jsonc` rather than against a hostname written down here, because
-   * the Worker's name is what decides the hostname. Rename the Worker and this fails, which is
-   * the moment the README went stale.
+   * The Worker's name comes from `wrangler.jsonc` rather than being written down here, because
+   * that name is what decides its hostname. Rename the Worker and this fails, which is the
+   * moment the README went stale.
    */
   const hero = README.match(/\[\*\*Open the app[^\]]*\]\((https:\/\/[^)]+)\)/u);
   assert.ok(hero, 'the README no longer tells anyone where to open the app');
@@ -99,10 +97,30 @@ test('the app it tells people to open is the one this repo actually deploys', ()
     fs.readFileSync(path.join(ROOT, 'wrangler.jsonc'), 'utf8').replace(/^\s*\/\/.*$/gmu, ''),
   ).name;
   const host = new URL(hero[1]).hostname;
+  const deployed = [new RegExp(`^${worker}\\..+\\.workers\\.dev$`, 'u'), /^[a-z0-9-]+\.vercel\.app$/u];
 
-  assert.match(
-    host,
-    new RegExp(`^${worker}\\..+\\.workers\\.dev$`, 'u'),
-    `the front door points at ${host}, which is not the "${worker}" Worker this repo deploys`,
+  assert.ok(
+    deployed.some((re) => re.test(host)),
+    `the front door points at ${host}, which is neither the "${worker}" Worker nor a Vercel deployment`,
   );
+});
+
+test('both addresses are offered, because they do not protect the same thing', () => {
+  /*
+   * One of these encrypts the site name on the way out and the other does not, so they are not
+   * interchangeable mirrors — the second one is the reader's way to not be seen opening this at
+   * all. Whichever is at the top, dropping the other silently removes that choice.
+   *
+   * Asserted on the URLs rather than on the sentence explaining them: prose gets reworded, and a
+   * test that breaks on a reword is one people learn to skip.
+   */
+  const worker = JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'wrangler.jsonc'), 'utf8').replace(/^\s*\/\/.*$/gmu, ''),
+  ).name;
+
+  const hosts = [...README.matchAll(/https:\/\/([a-z0-9.-]+)/gu)].map((m) => m[1]);
+  const onWorkers = hosts.some((h) => new RegExp(`^${worker}\\..+\\.workers\\.dev$`, 'u').test(h));
+  const onVercel = hosts.some((h) => /^[a-z0-9-]+\.vercel\.app$/u.test(h));
+
+  assert.ok(onWorkers && onVercel, 'only one of the two addresses is named, so the other is unreachable');
 });

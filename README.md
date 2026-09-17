@@ -6,7 +6,7 @@
 
 ### Send a file straight from one device to another.<br>Nothing in the middle can read it.
 
-[**Open the app →**](https://gear-drop.beastops.workers.dev)
+[**Open the app →**](https://gear-drop.vercel.app)
 
 [Host your own](DEPLOY.md) · [How it works](#how-it-works) · [What the server sees](#what-the-server-sees) · [What your Wi-Fi sees](#what-your-wi-fi-and-isp-see) · [Report a bug](https://github.com/beastops/gear-drop/issues)
 
@@ -76,19 +76,23 @@ They can't read what's inside an encrypted connection. But normally they can sti
 **name** of the site you opened, because that name goes out in the clear before the encryption
 starts.
 
-This app is served from a host that hides the name too. So they see you connect to one huge
-network that a huge number of other sites sit behind — not which of them you wanted.
+On the address above, that name is visible. Your network can tell you opened Gear Drop. It
+still can't tell who you sent anything to, or what — none of that ever leaves your device
+unsealed.
 
-One catch, and it's a real one: your browser has to look up addresses over an encrypted
-connection, or the name leaks during the lookup instead. Most browsers do that by default now.
-Most, not all — worth checking rather than assuming.
+**If you don't want even the name visible, open
+[gear-drop.beastops.workers.dev](https://gear-drop.beastops.workers.dev) instead.** Same app, same
+code, and it's worth knowing about. That address is served from a host that encrypts the site
+name as well, so your network sees a connection to one huge network that a huge number of other
+sites sit behind — not which of them you wanted.
 
-And here's what they can always see, no matter what: that you're online, roughly how much moved,
-and when. No website can hide that from its own end. Only Tor can, and this works over Tor.
+One catch on that one, and it's a real one: your browser has to look up addresses over an
+encrypted connection, or the name leaks during the lookup instead. Most browsers do that by
+default now. Most, not all — worth checking rather than assuming.
 
-> There's also [gear-drop.vercel.app](https://gear-drop.vercel.app) — same app, but that address
-> isn't hidden on the way out, so your network can see you opened it. Use it if the first one is
-> blocked where you are.
+And here's what they can always see, on either address, no matter what: that you're online,
+roughly how much moved, and when. No website can hide that from its own end. Only Tor can, and
+this works over Tor.
 
 ## On a phone
 
