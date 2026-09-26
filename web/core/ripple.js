@@ -22,6 +22,49 @@ import { scriptURL } from './tt.js';
  */
 const RING_COUNT = 13;
 
+/*
+ * How often the rings are drawn while nothing fast is on screen.
+ *
+ * They used to be drawn on every frame the display offered, which is sixty a second on most
+ * laptops, a hundred and twenty on a lot of phones and a hundred and forty-four on a gaming
+ * monitor, for a picture that drifts about twenty-four pixels a second. That is under a pixel a
+ * frame at thirty, so nobody can see the difference; what they could see was the rest of the
+ * machine slowing down, because a full-screen redraw at the display's rate kept the GPU busy
+ * the whole time the app was open, and the moment anything else wanted it the page stuttered.
+ *
+ * A burst is the exception. It crosses the screen in under a second, and gets every frame.
+ */
+const REST_FRAME_MS = 1000 / 30;
+/** Slack for vsync jitter, so a 60 Hz display lands on every second frame rather than every third. */
+const FRAME_SLACK_MS = 2;
+
+/**
+ * Advance the radar's clock to `now`, and say whether this frame is worth drawing.
+ *
+ * The worker and the main-thread fallback both pace themselves through this, so they cannot
+ * drift apart. Motion is integrated over real time, so a skipped frame is a frame not drawn
+ * rather than an animation that runs slower.
+ *
+ * `clock.last` of zero means "no previous frame", which is how a resume avoids integrating the
+ * time spent asleep.
+ */
+export function tick(clock, now, state, reduced) {
+  if (reduced) {
+    // Nothing moves, so the only reason to be here is that something changed.
+    clock.last = now;
+    state.burst = 0;
+    return true;
+  }
+  const fast = state.burst > 0;
+  if (clock.last && !fast && now - clock.last < REST_FRAME_MS - FRAME_SLACK_MS) return false;
+  const dt = clock.last ? Math.min(0.05, (now - clock.last) / 1000) : 0;
+  clock.last = now;
+  clock.phase = (clock.phase + dt * state.speed) % 1;
+  state.sweep = ((state.sweep || 0) + dt * (0.34 + (state.seeking || 0) * 0.5)) % (Math.PI * 2);
+  if (state.burst > 0) state.burst = Math.max(0, state.burst - dt * 1.4);
+  return true;
+}
+
 export class Radar {
   /** @param {object} opts.originEl  the element the rings radiate from, the beacon */
   constructor(canvas, { originEl } = {}) {
@@ -42,8 +85,7 @@ export class Radar {
 
     this.worker = null;
     this._raf = 0;
-    this._last = 0;
-    this._phase = 0;
+    this._clock = { last: 0, phase: 0 };
     this._paused = false;
 
     this._setup();
@@ -71,12 +113,19 @@ export class Radar {
     }
     this.ctx = this.canvas.getContext('2d');
     this.colors = colors;
-    this.resize();
-    this._loop(performance.now());
+    this.resize(); // which asks for the first frame
   }
 
+  /** Tell whichever side draws that something changed. */
   _post(msg) {
     if (this.worker) this.worker.postMessage(msg);
+    else this._wake();
+  }
+
+  /** Main thread: make sure a frame is coming. One at a time, and none while paused. */
+  _wake() {
+    if (this._raf || this._paused || !this.ctx) return;
+    this._raf = requestAnimationFrame((t) => this._loop(t));
   }
 
   resize() {
@@ -86,7 +135,7 @@ export class Radar {
      * The radar is soft rings on a dark ground: at 1.5 nobody can tell, and it is a quarter
      * less of the screen to shade on the one device that is paying for it out of the same
      * thermal budget as the modem and the display. It is the last thing in this app still
-     * drawing every frame.
+     * drawing continuously.
      */
     // `(pointer: coarse)` and not `(hover: none)`: Android Chrome answers the second one
     // `false`, so the ceiling this line exists to impose was never once applied on a phone.
@@ -118,34 +167,7 @@ export class Radar {
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-
-  /**
-   * What the glass layer needs in order to draw the same scene this does.
-   *
-   * The rings are drawn on a worker, on a canvas the main thread cannot read back, so the
-   * glass recomputes them rather than sampling. Both sides advance the same two numbers from
-   * the same speed, so they stay in step without anything being copied. A frame of drift is
-   * invisible: what the glass shows of the radar is a band a few pixels wide at the edge of a
-   * button.
-   */
-  snapshot(now = performance.now()) {
-    const dt = Math.min(0.05, (now - (this._mirrorAt || now)) / 1000);
-    this._mirrorAt = now;
-    if (!this.reduced && !this._paused) {
-      this._mirrorPhase = ((this._mirrorPhase || 0) + dt * this.state.speed) % 1;
-      this._mirrorSweep = ((this._mirrorSweep || 0) + dt * (0.34 + (this.state.seeking || 0) * 0.5)) % (Math.PI * 2);
-    }
-    const m = this.metrics || {};
-    const reach = Math.max((m.w || innerWidth) * 0.8, (m.h || innerHeight) * 1.15);
-    return {
-      originX: m.originX,
-      originY: m.originY,
-      gap: reach / RING_COUNT,
-      phase: this._mirrorPhase || 0,
-      sweep: this._mirrorSweep || 0,
-      seeking: this.state.seeking || 0,
-    };
+    this._wake(); // resizing a canvas clears it
   }
 
   /** Refresh the palette after a theme change. */
@@ -167,8 +189,12 @@ export class Radar {
   pause() {
     if (this._paused) return;
     this._paused = true;
-    if (this.worker) this._post({ t: 'paused', paused: true });
-    else if (this._raf) cancelAnimationFrame(this._raf);
+    if (this.worker) {
+      this._post({ t: 'paused', paused: true });
+    } else if (this._raf) {
+      cancelAnimationFrame(this._raf);
+      this._raf = 0;
+    }
   }
 
   resume() {
@@ -178,22 +204,32 @@ export class Radar {
       this._post({ t: 'paused', paused: false });
       return;
     }
-    this._last = 0; // do not integrate the time we spent asleep
-    this._loop(performance.now());
+    this._clock.last = 0; // do not integrate the time we spent asleep
+    this._wake();
+  }
+
+  /**
+   * Change some of the state, and send only that.
+   *
+   * Not the whole object. On a worker, the page's copy of the state never advances, so its
+   * `burst` stayed at 1 after the first one and its `sweep` stayed at 0, and sending all of it
+   * with every change restarted the burst and snapped the beam back to the start - five times a
+   * second during a transfer, and on every repaint of the device list.
+   */
+  _set(patch) {
+    Object.assign(this.state, patch);
+    this._post({ t: 'state', state: patch });
   }
 
   /** A one-off bright ring, for a device appearing or a transfer landing. */
   burst() {
     if (this.reduced) return;
-    this.state.burst = 1;
-    this._post({ t: 'state', state: this.state });
+    this._set({ burst: 1 });
   }
 
   /** 0 = nobody here, 1 = connected and busy. */
   setEnergy(level) {
-    this.state.intensity = 0.22 + 0.1 * level;
-    this.state.speed = 0.18 + 0.14 * level;
-    this._post({ t: 'state', state: this.state });
+    this._set({ intensity: 0.22 + 0.1 * level, speed: 0.18 + 0.14 * level });
   }
 
   /**
@@ -207,14 +243,12 @@ export class Radar {
   setSearching(on) {
     const next = on ? 1 : 0;
     if (this.state.seeking === next) return;
-    this.state.seeking = next;
-    this._post({ t: 'state', state: this.state });
+    this._set({ seeking: next });
   }
 
   /** Live transfer activity, 0..1, modulates the ring thickness. */
   setFlow(v) {
-    this.state.flow = Math.max(0, Math.min(1, v));
-    this._post({ t: 'state', state: this.state });
+    this._set({ flow: Math.max(0, Math.min(1, v)) });
   }
 
   /**
@@ -223,25 +257,20 @@ export class Radar {
    * mode raises the level, because it is the state waiting on the user.
    */
   setMood(mood) {
-    this.state.hue = mood; // 'accent' | 'verified' | 'local' | 'room' | 'share'
-    this.state.lift = mood === 'share' ? 1 : 0;
-    this._post({ t: 'state', state: this.state });
+    // 'accent' | 'verified' | 'local' | 'room' | 'share'
+    this._set({ hue: mood, lift: mood === 'share' ? 1 : 0 });
   }
 
   /* ------------------------------------------------ main-thread fallback */
 
   _loop(now) {
+    this._raf = 0;
     if (this._paused) return;
-    const dt = Math.min(0.05, (now - this._last) / 1000 || 0);
-    this._last = now;
-    if (!this.reduced) {
-      this._phase = (this._phase + dt * this.state.speed) % 1;
-      this.state.sweep =
-        (this.state.sweep + dt * (0.34 + (this.state.seeking || 0) * 0.5)) % (Math.PI * 2);
+    if (tick(this._clock, now, this.state, this.reduced)) {
+      drawRadar(this.ctx, this.metrics, this.state, this._clock.phase, this.colors, RING_COUNT);
     }
-    if (this.state.burst > 0) this.state.burst = Math.max(0, this.state.burst - dt * 1.4);
-    drawRadar(this.ctx, this.metrics, this.state, this._phase, this.colors, RING_COUNT);
-    this._raf = requestAnimationFrame((t) => this._loop(t));
+    // With reduced motion the picture only changes when told to, and `_post` asks for that frame.
+    if (!this.reduced) this._wake();
   }
 }
 
