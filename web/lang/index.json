@@ -1,0 +1,37 @@
+[
+  {
+    "native": "English",
+    "english": "English",
+    "dir": "ltr",
+    "code": "en",
+    "coverage": 100
+  },
+  {
+    "native": "Español",
+    "english": "Spanish",
+    "dir": "ltr",
+    "code": "es",
+    "coverage": 100
+  },
+  {
+    "native": "Deutsch",
+    "english": "German",
+    "dir": "ltr",
+    "code": "de",
+    "coverage": 100
+  },
+  {
+    "native": "Français",
+    "english": "French",
+    "dir": "ltr",
+    "code": "fr",
+    "coverage": 100
+  },
+  {
+    "native": "हिन्दी",
+    "english": "Hindi",
+    "dir": "ltr",
+    "code": "hi",
+    "coverage": 100
+  }
+]

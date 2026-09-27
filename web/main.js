@@ -54,7 +54,7 @@ import { Radar } from './core/ripple.js';
 import { platform, saveFile } from './core/platform.js';
 import { safeFileName, safePathSegments, riskOf } from './core/filename.js';
 import { Channel } from './core/channel.js';
-import { LOCALES, currentLocale, preferredLocale, setLocale, setText, t } from './ui/i18n.js';
+import { LOCALES, currentLocale, loadLocales, preferredLocale, setLocale, setText, t } from './ui/i18n.js';
 import { enableSwipeToDismiss, enableSwipeUpToDismiss } from './ui/swipe.js';
 import { captureDust } from './core/dust.js';
 
@@ -323,7 +323,15 @@ boot().catch((err) => toast(humanError(err?.message), 'bad'));
 async function boot() {
   loadLocalPrefs();
   applyTheme();
-  setLocale(app.prefs.lang || preferredLocale());
+  /*
+   * The list first, then the language.
+   *
+   * `preferredLocale` matches the browser's languages against the ones that exist, and the ones
+   * that exist now come from a file. Asking before it arrives would find only English and
+   * silently ignore a perfectly good preference.
+   */
+  await loadLocales();
+  await setLocale(app.prefs.lang || preferredLocale());
 
   /*
    * Nothing is read before this.
@@ -5259,7 +5267,7 @@ function buildLangList() {
     b.append(native, en);
 
     b.addEventListener('click', async () => {
-      setLocale(l.code);
+      await setLocale(l.code);
       app.prefs.lang = l.code;
       try {
         localStorage.setItem('lang', l.code);

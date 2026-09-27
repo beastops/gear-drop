@@ -12,7 +12,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { LOCALES, TABLES, t, setText, setLocale, currentLocale } from '../web/ui/i18n.js';
+import { TABLES, t, setText, setLocale, currentLocale } from '../web/ui/i18n.js';
+
+/*
+ * The languages as they ship, read off disk.
+ *
+ * Only English is in the module now; the rest are files fetched when chosen, which is what makes
+ * them editable by a translation platform. Reading them here rather than importing `TABLES` also
+ * means a file that is malformed, or listed in the manifest and absent from disk, fails in this
+ * suite instead of at somebody's first page load.
+ */
+const LANG_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'lang');
+const LOCALES = JSON.parse(fs.readFileSync(path.join(LANG_DIR, 'index.json'), 'utf8'));
+const SHIPPED = Object.fromEntries(
+  LOCALES.map((l) => [l.code, JSON.parse(fs.readFileSync(path.join(LANG_DIR, `${l.code}.json`), 'utf8'))]),
+);
 
 /** Keys that legitimately carry a {placeholder}. Everything else must not. */
 const WITH_VARS = new Set([
@@ -46,10 +60,10 @@ const WITH_VARS = new Set([
 
 test('every listed language reports its real coverage', () => {
   assert.ok(LOCALES.length >= 2, 'a picker with one language is not a picker');
-  const total = Object.keys(TABLES.en).length;
+  const total = Object.keys(SHIPPED.en).length;
   for (const l of LOCALES) {
     assert.ok(l.native && l.english, `${l.code} is missing a name`);
-    assert.equal(l.coverage, Math.round((Object.keys(TABLES[l.code]).length / total) * 100));
+    assert.equal(l.coverage, Math.round((Object.keys(SHIPPED[l.code]).length / total) * 100));
     assert.ok(l.coverage > 0 && l.coverage <= 100, `${l.code} reports ${l.coverage}%`);
   }
   assert.equal(LOCALES.find((x) => x.code === 'en').coverage, 100, 'English is the source of truth');
@@ -57,8 +71,8 @@ test('every listed language reports its real coverage', () => {
 
 test('a language claiming 100% really has every key', () => {
   for (const l of LOCALES.filter((x) => x.coverage === 100)) {
-    for (const key of Object.keys(TABLES.en)) {
-      assert.ok(TABLES[l.code][key], `${l.code} is missing ${key} but claims to be complete`);
+    for (const key of Object.keys(SHIPPED.en)) {
+      assert.ok(SHIPPED[l.code][key], `${l.code} is missing ${key} but claims to be complete`);
     }
   }
 });
@@ -75,7 +89,7 @@ test('placeholders are substituted', () => {
 });
 
 test('no string leaves a placeholder unfilled by accident, in any language', () => {
-  for (const [code, table] of Object.entries(TABLES)) {
+  for (const [code, table] of Object.entries(SHIPPED)) {
     for (const [key, value] of Object.entries(table)) {
       if (WITH_VARS.has(key)) continue;
       assert.ok(!/\{\w+\}/.test(value), `${code}:${key} contains an unexpected placeholder`);
@@ -84,7 +98,7 @@ test('no string leaves a placeholder unfilled by accident, in any language', () 
 });
 
 test('a key that takes a placeholder keeps it in every language', () => {
-  for (const [code, table] of Object.entries(TABLES)) {
+  for (const [code, table] of Object.entries(SHIPPED)) {
     for (const key of WITH_VARS) {
       if (!table[key]) continue;
       assert.ok(/\{\w+\}/.test(table[key]), `${code}:${key} dropped its placeholder in translation`);
@@ -93,7 +107,7 @@ test('a key that takes a placeholder keeps it in every language', () => {
 });
 
 test('a translation may only contain <b>, and it must be balanced', () => {
-  for (const [code, table] of Object.entries(TABLES)) {
+  for (const [code, table] of Object.entries(SHIPPED)) {
     for (const [key, value] of Object.entries(table)) {
       const tags = value.match(/<[^>]*>/g) || [];
       for (const tag of tags) assert.ok(tag === '<b>' || tag === '</b>', `${code}:${key} contains ${tag}`);
@@ -107,7 +121,7 @@ test('a translation may only contain <b>, and it must be balanced', () => {
 });
 
 test('no translation is empty or accidentally left as the key', () => {
-  for (const [code, table] of Object.entries(TABLES)) {
+  for (const [code, table] of Object.entries(SHIPPED)) {
     for (const [key, value] of Object.entries(table)) {
       assert.ok(typeof value === 'string' && value.trim(), `${code}:${key} is empty`);
       assert.notEqual(value, key, `${code}:${key} was never translated`);
@@ -144,16 +158,22 @@ test('setText survives a malformed translation without losing the text', () => {
   });
 });
 
-test('switching language changes what t() returns, and back again', () => {
-  withFakeDom(() => {
-    setLocale('hi');
+test('switching language changes what t() returns, and back again', async () => {
+  /*
+   * The table is handed over rather than fetched: a language is a file now, and there is no
+   * server here to serve it. What is under test is the switch and the fallback, not the
+   * transport - and `setLocale` is deliberately willing to use a table it already holds.
+   */
+  TABLES.hi = SHIPPED.hi;
+  await withFakeDom(async () => {
+    await setLocale('hi');
     assert.equal(currentLocale(), 'hi');
-    assert.equal(t('verify.yes'), TABLES.hi['verify.yes']);
-    assert.notEqual(t('verify.yes'), TABLES.en['verify.yes']);
+    assert.equal(t('verify.yes'), SHIPPED.hi['verify.yes']);
+    assert.notEqual(t('verify.yes'), SHIPPED.en['verify.yes']);
 
-    setLocale('zz-not-a-language');
+    await setLocale('zz-not-a-language');
     assert.equal(currentLocale(), 'en', 'an unknown locale falls back rather than blanking the app');
-    setLocale('en');
+    await setLocale('en');
   });
 });
 
@@ -183,7 +203,13 @@ function element(tagName = 'div') {
   };
 }
 
-function withFakeDom(fn) {
+/*
+ * Awaits the callback, because switching language is asynchronous now that a language is a file.
+ * The synchronous version tore the fake document down at the first `await` and the rest of the
+ * test ran against no document at all - which surfaced as an unhandled rejection after the test
+ * had already reported itself passing, the worst way for a fixture to be wrong.
+ */
+async function withFakeDom(fn) {
   const previous = globalThis.document;
   globalThis.document = {
     documentElement: {},
@@ -192,7 +218,7 @@ function withFakeDom(fn) {
     querySelectorAll: () => [],
   };
   try {
-    fn();
+    return await fn();
   } finally {
     globalThis.document = previous;
   }
@@ -322,7 +348,7 @@ const MACHINE_WORD = {
 
 test('no language calls it a relay on screen', () => {
   for (const [code, word] of Object.entries(MACHINE_WORD)) {
-    const offenders = Object.entries(TABLES[code])
+    const offenders = Object.entries(SHIPPED[code])
       .filter(([, v]) => word.test(v))
       .map(([k]) => `${code}:${k}`);
     assert.deepEqual(offenders, [], 'these still say it the machine\u2019s way');
@@ -346,7 +372,7 @@ test('and neither does the markup, or the manifest', () => {
 test('a transfer on one says it is encrypted, in every language', () => {
   // Asked for in these words: the status people see is the reassurance, not the plumbing.
   for (const code of Object.keys(MACHINE_WORD)) {
-    const status = TABLES[code]['st.relayed'];
+    const status = SHIPPED[code]['st.relayed'];
     assert.ok(status, `${code} has no relayed status`);
     assert.ok(status.length <= 24, `${code} status is too long to glance at: "${status}"`);
   }

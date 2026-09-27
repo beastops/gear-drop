@@ -67,6 +67,24 @@ test('every module the app imports is in the offline shell', () => {
   );
 });
 
+/*
+ * A language is a file fetched at runtime, so the import graph above never sees one. Missing
+ * from the shell, a translation works until the network goes, and then the app falls back to
+ * English - which is the designed behaviour for a missing file, so nothing would look wrong.
+ * `scripts/build-lang.mjs` writes these entries; this is what notices when it was not run.
+ */
+test('every language, and the list of them, is in the offline shell', () => {
+  const shell = new Set(shellList());
+  const files = fs.readdirSync(path.join(ROOT, 'lang')).filter((f) => f.endsWith('.json'));
+  const missing = files.map((f) => `lang/${f}`).filter((f) => !shell.has(f));
+  assert.deepEqual(missing, [], `run scripts/build-lang.mjs; not cached for offline use:\n  ${missing.join('\n  ')}`);
+
+  // And the picker offers exactly the languages that have a file behind them.
+  const listed = JSON.parse(fs.readFileSync(path.join(ROOT, 'lang', 'index.json'), 'utf8')).map((l) => l.code);
+  const onDisk = files.filter((f) => f !== 'index.json').map((f) => f.replace(/\.json$/, ''));
+  assert.deepEqual([...listed].sort(), [...onDisk].sort(), 'run scripts/build-lang.mjs; index.json is out of date');
+});
+
 test('the offline shell lists nothing that is not there', () => {
   const absent = shellList()
     // './' is the app root, served as index.html; it has no file of its own.
