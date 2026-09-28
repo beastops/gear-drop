@@ -32,6 +32,7 @@ const SHIPPED = Object.fromEntries(
 const WITH_VARS = new Set([
   'incoming.many',
   'toast.verifiedWaiting',
+  'toast.stillConnecting',
   'toast.unpairedBy',
   'verify.asked',
   'incoming.andMore',

@@ -961,7 +961,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
         relayAsked = true;
         return;
       }
-      if (conn.state !== 'ready' && !conn.usingRelay) offerRelay(conn, 'why.peer');
+      followRelay(conn);
       return;
     }
     if (!conn) return;
@@ -995,7 +995,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
   function askedForRelay(conn) {
     if (!relayAsked) return;
     relayAsked = false;
-    if (!conn.usingRelay) offerRelay(conn, 'why.peer');
+    followRelay(conn);
   }
 
   session.addEventListener('sas', (e) => {
@@ -1123,7 +1123,7 @@ function offerRelay(conn, why) {
   if (conn.relayAsked && Date.now() - conn.relayAsked < RELAY_REASK_MS) return;
   conn.relayAsked = Date.now();
 
-  toast(t('toast.relayOffer', { name: conn.name, why: t(why) }), 'bad', {
+  conn.relayToast = toast(t('toast.relayOffer', { name: conn.name, why: t(why) }), 'bad', {
     label: t('action.useRelay'),
     action: () => {
       conn.session.send({ t: 'relay-request' })?.catch?.(() => {});
@@ -1136,9 +1136,33 @@ function offerRelay(conn, why) {
   armFallback(conn);
 }
 
+/**
+ * The other device has moved to the encrypted connection. Go with it, without asking.
+ *
+ * A path is something two devices share, and a connection with one end on the relay and the
+ * other still waiting on a direct link carries nothing. That is what happened: when the direct
+ * attempt failed, both devices asked whether to use the encrypted connection, and a tap on
+ * one sent the other a request it then ignored, because it had already asked its own question
+ * and does not stack prompts. The device that tapped showed "encrypted", sent an offer the
+ * other side never heard, and the other side, still "connecting", answered every send with
+ * "Couldn't send". Reproduced with two profiles against the live relay.
+ *
+ * The question has been asked and answered, on the other device. Following costs nothing this
+ * app counts as private: the relay only ever sees sealed frames, it is the path the app
+ * already treats as the more private one, and a peer that wanted to keep this device off the
+ * direct path could always just decline it.
+ */
+function followRelay(conn) {
+  if (conn.usingRelay || conn.closed) return;
+  useRelay(conn, 'why.peer');
+}
+
 async function useRelay(conn, why) {
   if (conn.usingRelay || conn.closed) return;
   conn.usingRelay = true;
+  // A question still on screen about this is answered now, one way or the other.
+  conn.relayToast?.remove();
+  conn.relayToast = null;
   conn.rtc = conn.transport; // kept, in case it comes good later
 
   const relay = new RelayTransport(conn.session);
@@ -3080,6 +3104,9 @@ async function sendFiles(connId, fileList) {
   if (!conn) return toast(t('toast.notConnected'), 'bad');
   const files = [...(fileList || [])];
   if (!files.length) return;
+  // An offer needs a link to go down. Before there is one, "Couldn't send" reads as something
+  // wrong with the file, when all it needs is a moment.
+  if (conn.state !== 'ready') return toast(notReady(conn), 'bad');
 
   /*
    * The words, before the first file goes to a device nobody has checked.
@@ -4749,8 +4776,13 @@ async function sendChat() {
    * because it has been written and the person should see it where they wrote it, and the
    * mark is what says it has not left yet.
    */
-  if (!conn) {
-    if (!chat.isDurable(chatPeerId)) return;
+  // Not here, or here and not able to carry anything yet: a remembered device's message waits
+  // in the outbox, which is sent the moment the link opens.
+  if (!conn || conn.state !== 'ready') {
+    if (!chat.isDurable(chatPeerId)) {
+      if (conn) toast(notReady(conn), 'bad');
+      return;
+    }
     ui.chatInput.value = '';
     ui.chatInput.style.height = '';
     const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true });
@@ -4954,9 +4986,15 @@ async function destroyConversation(id, { tell = false, owe = true } = {}) {
  * server in this path at all, and on the rare occasion the relay is carrying the connection it
  * is carrying the same ciphertext it carries for everything else.
  */
+/** Why a connection that exists cannot carry anything yet, in words. */
+function notReady(conn) {
+  return conn.state === 'connecting' ? t('toast.stillConnecting', { name: conn.name }) : t('toast.notConnected');
+}
+
 async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
   const conn = app.conns.get(peerId);
   if (!conn || !file) return;
+  if (conn.state !== 'ready') return toast(notReady(conn), 'bad');
 
   /*
    * Something a conversation should not be holding still gets sent.
@@ -6301,6 +6339,8 @@ function toast(text, tone = '', opts = {}) {
     onLetGo: () => hide(1600),
   });
   while (ui.toastHost.children.length > 3) ui.toastHost.firstElementChild.remove();
+  // So a question that stops being relevant can be taken back off the screen.
+  return el;
 }
 
 /* ─────────────────────────────── the lock ──────────────────────────────── */

@@ -306,6 +306,7 @@ const en = {
   'toast.queueFailed': 'Couldn’t start the queued transfer',
   'toast.cancelled': 'Cancelled',
   'toast.verified': 'Verified. No code needed next time.',
+  'toast.stillConnecting': 'Still connecting to {name}. Try again in a moment.',
   'toast.verifiedWaiting': 'Verified. Confirm the words on {name} too, so both remember each other.',
   'toast.unpairedBy': '{name} forgot this device.',
   'toast.copyFailed': 'Couldn’t copy',

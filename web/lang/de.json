@@ -336,6 +336,7 @@
   "toast.saved": "{name} gespeichert",
   "toast.sendFailed": "Konnte nicht gesendet werden",
   "toast.staged": "Bereit. Fügen Sie ein Gerät hinzu, dann wartet es dort.",
+  "toast.stillConnecting": "Verbindung zu {name} wird noch aufgebaut. Versuche es gleich noch einmal.",
   "toast.unpairedBy": "{name} hat dieses Gerät vergessen.",
   "toast.verified": "Bestätigt. Beim nächsten Mal ohne Code.",
   "toast.verifiedWaiting": "Bestätigt. Bestätige die Wörter auch auf {name}, damit sich beide merken.",
