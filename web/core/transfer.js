@@ -17,7 +17,7 @@ import { transfers as transferStore } from './store.js';
 import { ReplayWindow, ratchetPair } from './session.js';
 import { addRange, contiguous, covered } from './ranges.js';
 import { safeFileName } from './filename.js';
-import { plausibleDuration } from './chat.js';
+import { plausibleDuration, isMessageId } from './chat.js';
 import { checkThumb } from './thumb.js';
 
 const VER = 1;
@@ -33,6 +33,21 @@ const CTL_BLOCK = 256;
 const TEXT_BLOCK = 1024;
 
 const MAX_TEXT = 32 * 1024;
+/** Messages named in one delete request. A conversation keeps a few hundred at most. */
+const MAX_UNSEND = 100;
+
+/** One entry of a delete request, reduced to the four fields it may carry, or null. */
+function cleanUnsend(item) {
+  if (!item || typeof item !== 'object' || !isMessageId(item.id)) return null;
+  const dir = item.dir === 'in' || item.dir === 'out' ? item.dir : null;
+  if (!dir) return null;
+  return {
+    id: item.id,
+    dir,
+    at: Number.isFinite(item.at) ? item.at : 0,
+    h: typeof item.h === 'string' && /^[0-9a-f]{16}$/.test(item.h) ? item.h : '',
+  };
+}
 const READ_AHEAD = 6; // prepared frames kept in flight
 const ACK_EVERY = 4 * 1024 * 1024;
 
@@ -360,10 +375,33 @@ export class TransferManager extends EventTarget {
         return this.dispatchEvent(new CustomEvent('peer-name', { detail: msg.name }));
       case 'text':
         // Bounded on the way in as well as on the way out: the sender's limit is the
-        // sender's, and this one arrives from someone else.
+        // sender's, and this one arrives from someone else. The id is the sender's name for
+        // the message, kept so either side can later delete it from both; anything that is
+        // not shaped like one is dropped, and the message is stored under an id of our own.
         return this.dispatchEvent(
-          new CustomEvent('text', { detail: String(msg.body ?? '').slice(0, MAX_TEXT) }),
+          new CustomEvent('text', {
+            detail: { body: String(msg.body ?? '').slice(0, MAX_TEXT), mid: isMessageId(msg.mid) ? msg.mid : '' },
+          }),
         );
+      case 'unsend': {
+        /*
+         * The other device deleted messages from this conversation and asks this one to do the
+         * same. Only ids and hashes, checked field by field, and a bounded number of them, so
+         * one frame cannot make this side search its log without end.
+         */
+        const items = (Array.isArray(msg.items) ? msg.items : [])
+          .slice(0, MAX_UNSEND)
+          .map(cleanUnsend)
+          .filter(Boolean);
+        if (items.length) this.dispatchEvent(new CustomEvent('unsend', { detail: items }));
+        return;
+      }
+      case 'unsent': {
+        // The other device has done it. What clears the request this side was holding.
+        const ids = (Array.isArray(msg.ids) ? msg.ids : []).slice(0, MAX_UNSEND).filter(isMessageId);
+        if (ids.length) this.dispatchEvent(new CustomEvent('unsent', { detail: ids }));
+        return;
+      }
       case 'bye':
         /*
          * The other device is going, and is saying so rather than being noticed.
@@ -407,11 +445,27 @@ export class TransferManager extends EventTarget {
    * Send a short message. It rides the same sealed control channel as everything else, so
    * the relay sees ciphertext padded to a block boundary, not even its length.
    */
-  sendText(text) {
-    return this._sendCtl(
-      { t: 'text', body: String(text).slice(0, MAX_TEXT) },
-      TEXT_BLOCK,
-    );
+  sendText(text, mid = '') {
+    const msg = { t: 'text', body: String(text).slice(0, MAX_TEXT) };
+    if (isMessageId(mid)) msg.mid = mid;
+    return this._sendCtl(msg, TEXT_BLOCK);
+  }
+
+  /**
+   * Ask the other device to delete messages from this conversation.
+   *
+   * Each is named by its shared id, and for a message from before ids were shared, by its
+   * direction, time and a short hash, which is all the other side needs to find its own copy.
+   * No words, no names: the frame says which, never what.
+   */
+  sendUnsend(items) {
+    const clean = (items || []).map(cleanUnsend).filter(Boolean).slice(0, MAX_UNSEND);
+    return this._sendCtl({ t: 'unsend', items: clean });
+  }
+
+  /** Confirm those are gone here, found or not, so the other side stops asking. */
+  sendUnsent(ids) {
+    return this._sendCtl({ t: 'unsent', ids: (ids || []).filter(isMessageId).slice(0, MAX_UNSEND) });
   }
 
   /**

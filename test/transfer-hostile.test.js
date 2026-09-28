@@ -233,6 +233,11 @@ test('no control message with a hostile number throws or moves a position out of
       { t: 'accept', transferId: 'tttttttttttt', files: value },
       { t: 'decline', transferId: 'tttttttttttt', reason: value },
       { t: 'text', body: value },
+      { t: 'text', body: 'x', mid: value },
+      { t: 'unsend', items: value },
+      { t: 'unsend', items: [value, { id: value, dir: value, at: value, h: value }] },
+      { t: 'unsent', ids: value },
+      { t: 'unsent', ids: [value] },
       { t: 'rename', name: value },
     ]) {
       await tm._onCtl(msg); // must never throw

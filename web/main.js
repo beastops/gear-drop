@@ -1200,6 +1200,11 @@ function wireTransport(conn, only) {
     // Anything this device was still owed is sent the moment it is reachable again.
     flushWipePending(conn);
     flushOutbox(conn).catch(() => {});
+    // After the same settle the outbox waits for: a frame sent the instant this side's channel
+    // opens can land before the other side is listening, and a delete has no reply to miss.
+    setTimeout(() => {
+      if (!conn.closed) flushUnsendPending(conn).catch(() => {});
+    }, FLUSH_SETTLE_MS);
     app.radar.burst();
     render();
     if (conn.sas && !conn.verified && !conn.member) promptVerify(conn);
@@ -1327,8 +1332,11 @@ function wireTransfers(conn) {
     conn.name = name;
     if (conn.peer) {
       conn.peer.name = name;
-      await savePeer(conn.peer);
-      app.paired = await allPeers();
+      // Written from the current record, never from `conn.peer`: see `updatePeer`. It arrives on every connection.
+      await updatePeer(conn.peer.id, (rec) => {
+        if (rec.name === name) return false;
+        rec.name = name;
+      });
     }
     render();
   });
@@ -1371,7 +1379,7 @@ function wireTransfers(conn) {
     const note = chatTransfers.get(transferId);
     if (note?.id === conn.id) {
       chatTransfers.delete(transferId);
-      if (await keepChatMedia(conn, file, entry, note)) return;
+      if (await keepChatMedia(conn, file, entry, { ...note, transferId })) return;
     }
 
     // On iOS a synthetic download click opens the file rather than saving it, and the share
@@ -1441,6 +1449,27 @@ function wireTransfers(conn) {
     app.radar.burst();
     blip();
     notify(conn.name, t('notify.message'));
+  });
+
+  /*
+   * The other device deleted messages and asks this one to do the same.
+   *
+   * Done without asking, for the reason an erase of the whole conversation is: the frame exists
+   * because the other side has already stopped holding them. No placeholder is left behind -
+   * "this message was deleted" is itself a record that something was said. Answered for every
+   * id asked about, found or not, so the other side can stop asking.
+   */
+  transfers.addEventListener('unsend', async (e) => {
+    const items = e.detail;
+    const ids = await chat.resolve(conn.id, items);
+    const out = await chat.remove(conn.id, ids);
+    if (out.removed.length && ui.chatDialog.open && chatPeerId === conn.id) dissolveBubbles(out.removed, out);
+    conn.transfers.sendUnsent(items.map((i) => i.id)).catch(() => {});
+  });
+
+  // The other device has done it: stop owing those.
+  transfers.addEventListener('unsent', (e) => {
+    clearUnsend(conn.id, e.detail).catch(() => {});
   });
 }
 
@@ -2885,7 +2914,8 @@ function openDeviceMenu(entry, anchor, tile) {
 
   // Anchor below the button, kept inside the viewport.
   const r = anchor.getBoundingClientRect();
-  const box = el.getBoundingClientRect();
+  // Layout size, not the painted box: the menu opens from 90% scale, so that is smaller than it will be.
+  const box = { width: el.offsetWidth, height: el.offsetHeight };
   const left = Math.min(Math.max(8, r.right - box.width), innerWidth - box.width - 8);
   const top = r.bottom + box.height + 8 > innerHeight ? r.top - box.height - 6 : r.bottom + 6;
   el.style.left = `${Math.round(left)}px`;
@@ -2929,6 +2959,25 @@ function deviceFacts(conn, entry, paired) {
   if (conn?.sas) out.push([t('fact.sas'), conn.sas]);
   out.push([t('fact.trust'), entry.verified ? t('st.verified') : t('st.unverified')]);
   return out;
+}
+
+/**
+ * Change one remembered device's record, starting from the copy that is current now.
+ *
+ * A record is several independent facts - its name, auto-accept, an erase or deletes still
+ * owed - and each is changed from a different place. Saving an older copy of the whole record
+ * puts every other fact back the way it was when that copy was taken. That was happening: the
+ * name a device announces on every connection was written back from the copy held since the
+ * connection started, which resurrected deletes already confirmed, dropped ones owed since,
+ * and could undo an owed erase or an auto-accept switched in the meantime. `change` gets the
+ * current record and may return false to write nothing.
+ */
+async function updatePeer(id, change) {
+  const rec = app.paired.find((p) => p.id === id);
+  if (!rec || change(rec) === false) return rec || null;
+  await savePeer(rec);
+  app.paired = await allPeers();
+  return app.paired.find((p) => p.id === id) || null;
 }
 
 async function setPeerPaused(id, paused) {
@@ -3907,10 +3956,13 @@ function bubbleTool(iconId, label, onClick) {
  * reopening - is exactly the kind of bookkeeping that ends up showing somebody a message
  * twice.
  */
-function renderChat(messages, { locked = false, ephemeral = false } = {}) {
+function renderChat(messages, { locked = false, ephemeral = false, keepScroll = false } = {}) {
   // Whatever is about to be drawn is the whole truth about this conversation; anything the
   // cache is still holding that is not in it has no message left to belong to.
   pruneMedia(messages);
+  const scrolledTo = ui.chatLog.scrollTop;
+  // Which of these are already on screen: those are redrawn in place, not animated in again.
+  const shown = new Set([...ui.chatLog.children].map((el) => el.dataset.id).filter(Boolean));
   ui.chatLog.replaceChildren();
   ui.chatEmpty.hidden = messages.length > 0 || locked;
   ui.chatLocked.hidden = !locked;
@@ -3922,6 +3974,11 @@ function renderChat(messages, { locked = false, ephemeral = false } = {}) {
   messages.forEach((m, i) => {
     const row = document.createElement('div');
     row.className = `bubble ${m.dir}`;
+    // What a delete, and the animation after one, find the bubble by.
+    row.dataset.id = m.id;
+    if (shown.has(m.id)) row.classList.add('settled');
+    // Held, or right-clicked: what can be done with this message, delete included.
+    onHold(row, () => openBubbleMenu(m, row));
     // Written, not yet gone. The mark is on the bubble rather than in a status line, because
     // it is a fact about this message and not about the conversation.
     if (m.pending) row.classList.add('waiting');
@@ -3959,6 +4016,8 @@ function renderChat(messages, { locked = false, ephemeral = false } = {}) {
         );
       }
     }
+    // On a pointer that hovers, the same delete sits beside the others.
+    tools.append(bubbleTool('#i-trash', t('chat.deleteEveryone'), () => deleteMessages(chatPeerId, [m])));
     row.append(tools);
     ui.chatLog.append(row);
 
@@ -3967,6 +4026,7 @@ function renderChat(messages, { locked = false, ephemeral = false } = {}) {
     if (!next || next.dir !== m.dir || next.at - m.at > 120_000) {
       const time = document.createElement('div');
       time.className = `bubble-time ${m.dir}`;
+      time.dataset.id = `t:${m.id}`;
       time.textContent = clockOf(m.at);
       ui.chatLog.append(time);
     }
@@ -3975,8 +4035,240 @@ function renderChat(messages, { locked = false, ephemeral = false } = {}) {
   // The rows are in the document now, so their tracks have a width to be fitted to.
   fitWaveforms();
 
-  // Newest last, so the bottom is where the conversation is.
-  ui.chatLog.scrollTop = ui.chatLog.scrollHeight;
+  // Newest last, so the bottom is where the conversation is. Unless something was taken out of
+  // the middle, when jumping to the end would lose the place being read.
+  ui.chatLog.scrollTop = keepScroll ? scrolledTo : ui.chatLog.scrollHeight;
+}
+
+/* ────────────────────── one message, from both devices ────────────────────── */
+
+/**
+ * Call `open` when `el` is held, or right-clicked.
+ *
+ * Held means half a second without moving: a finger that drifts more than a few pixels is
+ * scrolling the conversation, and the browser taking the gesture over for a scroll cancels
+ * it too. The click that follows a hold is swallowed, so letting go does not also press
+ * whatever was under the finger. A light tick where the device can give one, because a hold
+ * that answers only after the finger lifts feels like it did not work.
+ */
+function onHold(el, open) {
+  let timer = 0;
+  let from = null;
+  let fired = false;
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = 0;
+    from = null;
+    el.classList.remove('pressing');
+  };
+  el.addEventListener('pointerdown', (e) => {
+    fired = false;
+    if (e.button !== 0 || e.target.closest?.('button, a, input, .audio-track')) return;
+    from = { x: e.clientX, y: e.clientY };
+    el.classList.add('pressing');
+    timer = setTimeout(() => {
+      cancel();
+      fired = true;
+      navigator.vibrate?.(12);
+      open();
+    }, 480);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 8) cancel();
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, cancel);
+  el.addEventListener('click', (e) => {
+    if (!fired) return;
+    fired = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  el.addEventListener('contextmenu', (e) => {
+    if (e.target.closest?.('a, input')) return;
+    e.preventDefault();
+    cancel();
+    open();
+  });
+}
+
+/** What can be done with one message: the actions it already had, and deleting it. */
+function openBubbleMenu(m, row) {
+  closeMenu();
+  const peerId = chatPeerId;
+  const el = document.createElement('div');
+  el.className = 'menu bubble-menu';
+  el.setAttribute('role', 'menu');
+
+  const item = (label, icon, fn, opts = {}) => {
+    const b = document.createElement('button');
+    b.className = 'menu-item' + (opts.danger ? ' danger' : '');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', icon);
+    svg.append(use);
+    const span = document.createElement('span');
+    span.textContent = label;
+    b.append(svg, span);
+    b.addEventListener('click', () => {
+      closeMenu();
+      fn();
+    });
+    el.append(b);
+  };
+
+  if (m.kind === 'image') item(t('chat.save'), '#i-install', () => saveChatMedia(m));
+  else if (m.kind === 'audio') item(t('chat.saveAudio'), '#i-install', () => saveChatMedia(m));
+  else {
+    item(t('chat.copy'), '#i-file', async () => {
+      try {
+        await navigator.clipboard.writeText(m.text);
+        toast(t('chat.copied'), 'good');
+      } catch {
+        toast(t('toast.copyFailed'), 'bad');
+      }
+    });
+    const url = soleUrl(m.text);
+    if (url) item(t('recv.open'), '#i-link', () => window.open(url, '_blank', 'noopener,noreferrer'));
+  }
+  el.append(Object.assign(document.createElement('div'), { className: 'menu-sep' }));
+  item(t('chat.deleteEveryone'), '#i-trash', () => deleteMessages(peerId, [m]), { danger: true });
+
+  /*
+   * Above the conversation, which is a modal dialog in the top layer. A menu appended to the
+   * page would open underneath it. A popover is in the top layer too, and later, so on top; a
+   * browser without popovers gets it inside the dialog instead.
+   */
+  if (typeof el.showPopover === 'function') {
+    el.popover = 'manual';
+    document.body.append(el);
+    el.showPopover();
+  } else {
+    ui.chatDialog.append(el);
+  }
+
+  // Beside the message, on its own side, kept inside the window.
+  const r = row.getBoundingClientRect();
+  // Layout size, not the painted box: the menu opens from 90% scale, so that is smaller than it will be.
+  const box = { width: el.offsetWidth, height: el.offsetHeight };
+  const wanted = m.dir === 'out' ? r.right - box.width : r.left;
+  const left = Math.min(Math.max(8, wanted), innerWidth - box.width - 8);
+  const top = r.bottom + box.height + 8 > innerHeight ? r.top - box.height - 6 : r.bottom + 6;
+  el.style.left = `${Math.round(left)}px`;
+  el.style.top = `${Math.round(Math.max(8, top))}px`;
+
+  row.classList.add('menu-open');
+  openMenu = { el, tile: row };
+}
+
+/**
+ * Delete messages from this conversation, here and on the other device.
+ *
+ * Here first, and whatever happens there: the log is rewritten without them and anything they
+ * carried is deleted, before a frame is sent. Then the other device is asked to do the same.
+ * For a remembered device the request is kept until that device confirms, and sent again every
+ * time it connects, so one that is away now still loses the message when it comes back.
+ */
+async function deleteMessages(peerId, list) {
+  if (!peerId || !list?.length) return;
+  const items = await Promise.all(
+    list.map(async (m) => ({ id: m.id, dir: m.dir, at: m.at, h: await chat.fingerprint(m) })),
+  );
+  const out = await chat.remove(peerId, items.map((i) => i.id));
+  if (ui.chatDialog.open && chatPeerId === peerId) dissolveBubbles(out.removed, out);
+
+  const conn = app.conns.get(peerId);
+  const owed = await oweUnsend(peerId, items);
+  let told = false;
+  if (conn?.state === 'ready') {
+    try {
+      await conn.transfers.sendUnsend(items);
+      told = true;
+    } catch {
+      /* owed, if it can be; said below either way */
+    }
+  }
+  if (told) return;
+  const name = conn?.name || app.paired.find((p) => p.id === peerId)?.name || t('tile.unnamed');
+  toast(owed ? t('chat.unsendLater', { name }) : t('chat.unsendHereOnly', { name }));
+}
+
+/**
+ * Take deleted bubbles out of the open conversation, as dust, and close the gap smoothly.
+ *
+ * The same order the whole-conversation delete uses: the pixels are captured while the bubbles
+ * are still there, the log is redrawn without them, and only then does anything animate, so
+ * what moves is coloured dust on a canvas and not the message. Everything that was below them
+ * slides up from where it was rather than jumping.
+ */
+function dissolveBubbles(ids, { messages, locked = false, ephemeral = false }) {
+  const gone = new Set(ids);
+  const rows = [...ui.chatLog.children].filter((el) => gone.has(el.dataset.id));
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const before = new Map();
+  if (!reduced) for (const el of ui.chatLog.children) if (el.dataset.id) before.set(el.dataset.id, el.getBoundingClientRect().top);
+
+  const dust = captureDust(ui.chatLog.closest('.chat-sheet'), rows);
+  renderChat(messages, { locked, ephemeral, keepScroll: true });
+  paintChatState();
+  dust();
+
+  if (reduced) return;
+  for (const el of ui.chatLog.children) {
+    const was = before.get(el.dataset.id);
+    if (was === undefined) continue;
+    const moved = was - el.getBoundingClientRect().top;
+    if (Math.abs(moved) < 1) continue;
+    el.animate([{ transform: `translateY(${moved}px)` }, { transform: 'none' }], {
+      duration: 340,
+      easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+    });
+  }
+}
+
+/**
+ * Keep a delete request for a remembered device until it says it is done.
+ *
+ * On the device's own record, like an owed erase of the whole conversation, and holding only
+ * ids and hashes, never the words. A device that was never paired has nothing to come back to:
+ * its conversation lived only in memory on both sides. Returns whether it is being kept.
+ */
+async function oweUnsend(peerId, items) {
+  const rec = app.paired.find((p) => p.id === peerId);
+  if (!rec) return false;
+  if (rec.wipePending) return true; // the whole conversation is already owed; that covers these
+  const have = new Set((rec.unsendPending || []).map((i) => i.id));
+  rec.unsendPending = [...(rec.unsendPending || []), ...items.filter((i) => !have.has(i.id))].slice(-500);
+  await savePeer(rec);
+  app.paired = await allPeers();
+  return true;
+}
+
+async function clearUnsend(peerId, ids) {
+  const rec = app.paired.find((p) => p.id === peerId);
+  if (!rec?.unsendPending?.length) return;
+  const done = new Set(ids);
+  const left = rec.unsendPending.filter((i) => !done.has(i.id));
+  if (left.length === rec.unsendPending.length) return;
+  if (left.length) rec.unsendPending = left;
+  else delete rec.unsendPending;
+  await savePeer(rec);
+  app.paired = await allPeers();
+}
+
+/** Send whatever deletes this device still owes the one that just connected. */
+async function flushUnsendPending(conn) {
+  const owed = app.paired.find((p) => p.id === conn.id)?.unsendPending;
+  if (!owed?.length) return;
+  for (let i = 0; i < owed.length; i += 100) {
+    try {
+      await conn.transfers.sendUnsend(owed.slice(i, i + 100));
+    } catch {
+      return; // the rest go on the next connection
+    }
+  }
 }
 
 /**
@@ -4785,7 +5077,7 @@ async function sendChat() {
     }
     ui.chatInput.value = '';
     ui.chatInput.style.height = '';
-    const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true });
+    const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true, id: chat.newId() });
     renderChat(held.messages, { locked: held.locked, ephemeral: held.ephemeral });
     paintChatState();
     return;
@@ -4795,8 +5087,10 @@ async function sendChat() {
   ui.chatInput.style.height = '';
   paintChatState();
 
+  // Named now, so both sides store it under the same id and either can delete it later.
+  const id = chat.newId();
   try {
-    await conn.transfers.sendText(body);
+    await conn.transfers.sendText(body, id);
   } catch {
     toast(t('toast.sendFailed'), 'bad');
     // Put it back rather than losing what was typed.
@@ -4805,7 +5099,7 @@ async function sendChat() {
     return;
   }
 
-  const { messages, locked, ephemeral } = await chat.append(chatPeerId, { dir: 'out', text: body });
+  const { messages, locked, ephemeral } = await chat.append(chatPeerId, { dir: 'out', text: body, id });
   renderChat(messages, { locked, ephemeral });
 }
 
@@ -4836,7 +5130,7 @@ async function flushOutbox(conn) {
   for (const m of waiting) {
     if (conn.closed || !m.text) break;
     try {
-      await conn.transfers.sendText(m.text);
+      await conn.transfers.sendText(m.text, m.id);
       sent.push(m.id);
     } catch {
       break;
@@ -4867,6 +5161,8 @@ async function markWipePending(id) {
   const rec = app.paired.find((p) => p.id === id);
   if (!rec || rec.wipePending) return false;
   rec.wipePending = Date.now();
+  // Deleting everything covers deleting some of it.
+  delete rec.unsendPending;
   await savePeer(rec);
   app.paired = await allPeers();
   return true;
@@ -5027,8 +5323,9 @@ async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
    */
   const known = kind === 'audio' ? dur || (await audioDuration(bytes, file.type)) : 0;
 
+  let transferId;
   try {
-    await conn.transfers.offer([file], { chat: true, voice, dur: known });
+    transferId = await conn.transfers.offer([file], { chat: true, voice, dur: known });
   } catch (err) {
     return toast(t(err?.name === 'BusyError' ? 'chat.photoBusy' : 'toast.sendFailed'), 'bad');
   }
@@ -5036,6 +5333,7 @@ async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
   const att = await chat.putAttachment(peerId, bytes);
   const { messages, locked, ephemeral } = await chat.append(peerId, {
     dir: 'out',
+    id: transferId,
     media: {
       kind,
       att,
@@ -5062,7 +5360,7 @@ async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
  * it as the ordinary file it also is: better to hand someone a download they did not expect
  * than to lose what they were sent.
  */
-async function keepChatMedia(conn, result, entry, { voice = false, dur = 0 } = {}) {
+async function keepChatMedia(conn, result, entry, { voice = false, dur = 0, transferId = '' } = {}) {
   try {
     const blob = result?.file;
     // Only the shapes that carry their bytes; a save-dialog sink wrote straight to a place of
@@ -5077,6 +5375,7 @@ async function keepChatMedia(conn, result, entry, { voice = false, dur = 0 } = {
 
     const { messages, locked, ephemeral } = await chat.append(conn.id, {
       dir: 'in',
+      id: transferId,
       media: {
         kind,
         att,
@@ -5111,8 +5410,8 @@ async function keepChatMedia(conn, result, entry, { voice = false, dur = 0 } = {
  * peer, it is redrawn; otherwise the conversation is brought up, which is what the old
  * one-shot dialog did and is still the right answer for something that just arrived.
  */
-async function onChatText(conn, text) {
-  const { messages, locked, ephemeral } = await chat.append(conn.id, { dir: 'in', text });
+async function onChatText(conn, { body, mid }) {
+  const { messages, locked, ephemeral } = await chat.append(conn.id, { dir: 'in', text: body, id: mid });
 
   if (ui.chatDialog.open && chatPeerId === conn.id) {
     renderChat(messages, { locked, ephemeral });
@@ -5177,10 +5476,11 @@ function paintDevicesDialog() {
     sw.setAttribute('aria-label', `${t('devices.autoAccept')} — ${peer.name || 'Device'}`);
     sw.setAttribute('aria-checked', String(!!peer.autoAccept));
     sw.addEventListener('click', async () => {
-      peer.autoAccept = !peer.autoAccept;
-      sw.setAttribute('aria-checked', String(!!peer.autoAccept));
-      await savePeer(peer);
-      app.paired = await allPeers();
+      // From the current record, not the one this list was drawn from; see `updatePeer`.
+      const now = await updatePeer(peer.id, (rec) => {
+        rec.autoAccept = !rec.autoAccept;
+      });
+      sw.setAttribute('aria-checked', String(!!now?.autoAccept));
     });
 
     const unpair = document.createElement('button');

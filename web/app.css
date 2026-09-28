@@ -1265,6 +1265,18 @@ body.theme-light .peer.ready .avatar {
   from { opacity: 0; transform: scale(0.9); }
   to { opacity: 1; transform: none; }
 }
+/*
+ * A menu opened over a sheet is a popover, so it can sit above the sheet in the top layer. The
+ * browser gives a popover its own box - a border, centring, an inset of zero - none of which a
+ * menu wants: the border drew a white frame and the inset stretched it off the side of a phone.
+ */
+.menu[popover] {
+  inset: auto;
+  margin: 0;
+  border: 0;
+  color: inherit;
+}
+.bubble-menu { transform-origin: top center; }
 .menu.closing {
   animation: menu-out 130ms cubic-bezier(0.4, 0, 1, 1) forwards;
   pointer-events: none;
@@ -1624,6 +1636,31 @@ body.theme-light .peer.ready .avatar {
 @keyframes bubble-in {
   from { opacity: 0; transform: translateY(6px) scale(0.96); }
   to { opacity: 1; transform: none; }
+}
+/*
+ * Only a message that is new arrives. The log is redrawn whole on every change, and without
+ * this every bubble already on screen popped in again with each message sent, received or
+ * deleted - the whole conversation flickering to say that one line changed.
+ */
+.bubble.settled { animation: none; }
+
+/*
+ * Held. The bubble gives a little under the finger, so a hold feels like it is doing
+ * something before the menu appears, and eases back if the finger moves off to scroll.
+ */
+.bubble { transition: transform var(--t) var(--ease); }
+.bubble.pressing { transform: scale(0.97); }
+.bubble.menu-open { transform: scale(1.02); }
+/*
+ * And the phone's own long-press - the text selection and its callout - is kept out of the
+ * way, since holding a message is a gesture of this app's. Copying is in the menu it opens.
+ */
+@media (pointer: coarse) {
+  .bubble {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 /*
@@ -1997,8 +2034,18 @@ body.theme-light .peer.ready .avatar {
 .bubble.in .bubble-tools { left: calc(100% + 6px); }
 .bubble:hover .bubble-tools,
 .bubble:focus-within .bubble-tools { opacity: 1; }
-@media (any-pointer: coarse) {
-  /* Nothing to hover with: the actions are simply there. */
+/*
+ * A phone holds a message for its actions instead.
+ *
+ * With nothing to hover with, these round buttons used to be drawn beside every bubble all the
+ * time, two or three per message down the whole conversation. Holding a message now opens the
+ * same actions in a menu, so where touch is the primary input the buttons go. A laptop with a
+ * touchscreen keeps them for its mouse, and can hold a bubble too.
+ */
+@media (pointer: coarse) {
+  .bubble-tools { display: none; }
+}
+@media (any-pointer: coarse) and (pointer: fine) {
   .bubble-tools { opacity: 1; }
 }
 .bubble-tool {

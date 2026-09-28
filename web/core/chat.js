@@ -133,6 +133,18 @@ function messageId(at) {
   return `${at.toString(36)}-${[...r].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
+/**
+ * A fresh id for a message about to be sent, so the other side can store it under the same one.
+ *
+ * Shared because deleting a message from both devices means both have to agree which one it
+ * is. Random, so it says nothing about the message.
+ */
+export const newId = () => messageId(Date.now());
+
+/** What a message id from somewhere else may look like: ours, or a transfer id. */
+const ID_SHAPE = /^[0-9a-z-]{8,40}$/;
+export const isMessageId = (v) => typeof v === 'string' && ID_SHAPE.test(v);
+
 /** Conversations with peers whose identity does not outlive the tab. */
 const session = new Map();
 
@@ -283,14 +295,15 @@ export function append(peerId, message) {
   return serialise(peerId, () => appendNow(peerId, message));
 }
 
-async function appendNow(peerId, { dir, text, media, pending = false }) {
+async function appendNow(peerId, { dir, text, media, pending = false, id = null }) {
   // A picture or a recording is a message with no words in it, so "nothing to add" has two
   // shapes.
   if (!peerId || (!text && !media)) return { messages: [], locked: false };
 
   const at = Date.now();
   const msg = {
-    id: messageId(at),
+    // The sender's id when there is one, so both sides can name this message later.
+    id: isMessageId(id) ? id : messageId(at),
     dir: dir === 'out' ? 'out' : 'in',
     text: String(text || '').slice(0, MAX_TEXT),
     at,
@@ -334,8 +347,19 @@ async function appendNow(peerId, { dir, text, media, pending = false }) {
     }
   }
 
+  /*
+   * The same message delivered twice is kept once.
+   *
+   * An outbox flush that dies between sending a message and marking it sent sends it again the
+   * next time, and with a shared id that is recognisable as a repeat rather than a second message
+   * that happens to say the same thing.
+   */
+  const repeat = (list) => isMessageId(id) && list.some((m) => m.id === msg.id && m.dir === msg.dir);
+
   if (!isDurable(peerId)) {
-    const next = [...(session.get(peerId) || []), msg].slice(-MAX_MESSAGES);
+    const held = session.get(peerId) || [];
+    if (repeat(held)) return { messages: held, locked: false, ephemeral: true };
+    const next = [...held, msg].slice(-MAX_MESSAGES);
     session.set(peerId, next);
     return { messages: next, locked: false, ephemeral: true };
   }
@@ -344,9 +368,91 @@ async function appendNow(peerId, { dir, text, media, pending = false }) {
   // A locked log cannot be appended to without destroying what is already in it. Better to
   // keep the unreadable record and let this message live only on screen.
   if (locked) return { messages: [msg], locked: true };
+  if (repeat(messages)) return { messages, locked: false };
 
   const next = await save(peerId, [...messages, msg]);
   return { messages: next, locked: false };
+}
+
+/**
+ * Take messages out of a conversation for good, and anything they carried with them.
+ *
+ * The log is rewritten sealed without them, and a picture or a recording is deleted from the
+ * attachment store rather than orphaned, so nothing of the message is left on this device.
+ * Returns the conversation as it now stands and which of the ids were actually there.
+ */
+export function remove(peerId, ids) {
+  return serialise(peerId, () => removeNow(peerId, ids));
+}
+
+async function removeNow(peerId, ids) {
+  const gone = new Set((ids || []).filter(isMessageId));
+  const { messages, locked, ephemeral } = await load(peerId);
+  if (locked || !gone.size) return { messages, locked, ephemeral, removed: [] };
+
+  const removed = messages.filter((m) => gone.has(m.id));
+  if (!removed.length) return { messages, locked, ephemeral, removed: [] };
+  const kept = messages.filter((m) => !gone.has(m.id));
+
+  if (isDurable(peerId)) await save(peerId, kept);
+  else session.set(peerId, kept);
+  await dropAttachments(removed.map((m) => m.att).filter(Boolean));
+  return { messages: kept, locked: false, ephemeral, removed: removed.map((m) => m.id) };
+}
+
+/**
+ * A short one-way hash of what a message was: its words, or a file's name and size.
+ *
+ * Only for finding a message from before ids were shared, on the other device, when it is
+ * deleted. It travels sealed like everything else, and is sixteen hex digits that say nothing
+ * about the words unless you already have them.
+ */
+export async function fingerprint(m) {
+  const what = m?.text ? `t:${m.text}` : `f:${m?.name || ''}|${m?.size || 0}`;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', te.encode(what)));
+  return [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** How far apart two clocks' ideas of the same moment are allowed to be, for an old message. */
+const MATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Which messages here a delete request from the other device means.
+ *
+ * By the shared id first. A message from before ids were shared has a different one on each
+ * side, so it is found by what it was: the other direction (their "sent" is this side's
+ * "received"), the same fingerprint, and the closest time, each message claimed at most once.
+ */
+export async function resolve(peerId, items) {
+  const { messages, locked } = await load(peerId);
+  if (locked) return [];
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  const claimed = new Set();
+  const out = [];
+
+  for (const item of items || []) {
+    const direct = byId.get(item?.id);
+    if (direct && !claimed.has(direct.id)) {
+      claimed.add(direct.id);
+      out.push(direct.id);
+      continue;
+    }
+    if (!/^[0-9a-f]{16}$/.test(item?.h || '') || !Number.isFinite(item?.at)) continue;
+    const mine = item.dir === 'out' ? 'in' : 'out';
+    let best = null;
+    for (const m of messages) {
+      if (claimed.has(m.id) || m.dir !== mine) continue;
+      const gap = Math.abs(m.at - item.at);
+      if (gap > MATCH_WINDOW_MS || (best && gap >= best.gap)) continue;
+      if ((await fingerprint(m)) !== item.h) continue;
+      best = { m, gap };
+    }
+    if (best) {
+      claimed.add(best.m.id);
+      out.push(best.m.id);
+    }
+  }
+  return out;
 }
 
 /** Everything still waiting to go to this device, oldest first. */
