@@ -31,6 +31,8 @@ const SHIPPED = Object.fromEntries(
 /** Keys that legitimately carry a {placeholder}. Everything else must not. */
 const WITH_VARS = new Set([
   'incoming.many',
+  'toast.verifiedWaiting',
+  'toast.unpairedBy',
   'verify.asked',
   'incoming.andMore',
   'incoming.queuedStart',

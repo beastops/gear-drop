@@ -386,6 +386,54 @@ async function markSentNow(peerId, ids) {
   if (touched) await save(peerId, messages);
 }
 
+/**
+ * Carry a conversation over to a new identity for the same device.
+ *
+ * Two moments need it. A device met on the network is `chan:…` until it is paired, and pairing
+ * gives it a durable id, which can now happen while the conversation is open: the pairing is
+ * written when the *other* screen confirms, whenever that is. And a stale pairing replaced by a
+ * new one with the same device brings its history with it rather than taking it to the grave.
+ *
+ * Attachments are re-stored under the new id, since the id is how a sweep decides which ones
+ * are still wanted. Messages are merged by time with anything already under the new id.
+ *
+ * Returns false, and leaves everything where it was, when the old log cannot be read: moving
+ * a conversation this browser cannot open would mean deleting it.
+ */
+export function adopt(fromId, toId) {
+  if (!fromId || !toId || fromId === toId) return Promise.resolve(true);
+  return serialise(toId, () => serialise(fromId, () => adoptNow(fromId, toId)));
+}
+
+async function adoptNow(fromId, toId) {
+  const from = await load(fromId);
+  if (from.locked) return false;
+  if (!from.messages.length) {
+    await clear(fromId);
+    return true;
+  }
+
+  const into = await load(toId);
+  if (into.locked) return false;
+
+  const moved = [];
+  for (const m of from.messages) {
+    const copy = { ...m };
+    if (m.att) {
+      const bytes = await getAttachment(m.att);
+      // A picture already lost stays drawn as lost, with its name and size, as `load` would.
+      copy.att = bytes ? await putAttachment(toId, bytes) : m.att;
+    }
+    moved.push(copy);
+  }
+  const merged = [...into.messages, ...moved].sort((a, b) => a.at - b.at);
+
+  if (isDurable(toId)) await save(toId, merged);
+  else session.set(toId, merged.slice(-MAX_MESSAGES));
+  await clear(fromId);
+  return true;
+}
+
 /** Forget one conversation. Called when a device is unpaired, and from the chat itself. */
 export async function clear(peerId) {
   if (!peerId) return;

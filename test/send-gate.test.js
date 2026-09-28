@@ -78,8 +78,13 @@ test('the held files go only once the device really is verified', () => {
   const releaseAt = resolve.lastIndexOf('releaseHeldSend(conn)');
   assert.ok(verifiedAt > 0 && releaseAt > 0, 'resolveVerify no longer verifies or releases');
   assert.ok(releaseAt > verifiedAt, 'the files are released before the device is marked verified');
-  // And the connection is re-keyed to its pairing id on the way, so the held record must follow.
-  assert.match(resolve, /if \(heldSend\?\.connId === oldId\) heldSend\.connId = id;/, 'the held id is not re-keyed');
+  // And when both sides have confirmed, the connection is re-keyed to its pairing id, which can
+  // happen after the files were released or while they are still held, so the record must follow.
+  assert.match(
+    body('async function rememberPair(conn)'),
+    /if \(heldSend\?\.connId === oldId\) heldSend\.connId = id;/,
+    'the held id is not re-keyed',
+  );
 });
 
 test('an answer about one device does not throw away files picked for another', () => {

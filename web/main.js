@@ -965,9 +965,30 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
       return;
     }
     if (!conn) return;
-    // The peer confirmed the words on its side and wants this device to hold the pairing too.
-    // Nothing is remembered here until the words are read on this screen as well.
-    if (e.detail?.t === 'pair-ask' && !conn.verified) promptVerify(conn, { force: true, asked: true });
+    /*
+     * The other device has confirmed the words on its screen.
+     *
+     * If this one has too, that is both, and the pairing is written now. If not, this screen
+     * is asked, straight away when it is free and otherwise as soon as it is. Nothing is
+     * remembered on either side until both have read the words.
+     */
+    if (e.detail?.t === 'pair-ask') {
+      if (conn.peer) return; // already remembered on this side
+      conn.theirWordsOk = true;
+      if (conn.wordsOk) rememberPair(conn).catch(() => {});
+      else askToPair(conn);
+      return;
+    }
+    /*
+     * The other device forgot this one.
+     *
+     * Only a pairing can say so: the session it arrives on is keyed from the root, or was
+     * checked with the words before it became one. A stranger on a channel has no record here
+     * to remove, so nothing it sends reaches this.
+     */
+    if (e.detail?.t === 'unpair') {
+      if (conn.peer) forgetDevice(conn.peer.id, { theirs: true }).catch(() => {});
+    }
   });
 
   /** A relay request that landed before this connection existed, acted on now. */
@@ -979,13 +1000,17 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
 
   session.addEventListener('sas', (e) => {
     const conn = app.conns.get(connId);
-    if (!conn) return;
+    // Only this session's own connection. See 'peer-gone' below for how another can hold the id.
+    if (!conn || conn.session !== session) return;
     conn.sas = e.detail.join(' · ');
     // A remembered device is verified by construction: the pairing root is folded into
     // the key, so only that device could have produced it. Do not nag about it again.
     // A device met through a channel is not nagged either, since there may be a roomful of
     // them, but it stays marked unverified and its words are one click away.
-    if (!conn.verified && !member && conn.transport.ctl?.readyState === 'open') promptVerify(conn);
+    // The exception is one whose person has already confirmed on their side and is waiting on
+    // this one: a request that arrived before there were words to show is asked now.
+    if (conn.theirWordsOk && !conn.wordsOk) askToPair(conn);
+    else if (!conn.verified && !member && conn.transport.ctl?.readyState === 'open') promptVerify(conn);
     render();
   });
 
@@ -994,7 +1019,18 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
   // every other implementation restart a 4 GB file from zero.
   session.addEventListener('peer-gone', () => {
     const conn = app.conns.get(connId);
-    if (!conn) return;
+    /*
+     * Only if the connection under this id is this session's.
+     *
+     * Two sessions can answer to one id. A device met on the network and then paired keeps the
+     * conversation it already has, re-keyed under the pairing id, and the pairing starts
+     * listening at its own rendezvous under that same id. The rendezvous session then keys with
+     * the other device, stands down because the device is already connected, and is nudged now
+     * and then like any idle pairing - and each nudge is a departure on that tag. Acting on it
+     * here dropped the live conversation about two seconds after every pairing, and the device
+     * went "offline" until the rendezvous brought it back.
+     */
+    if (!conn || conn.session !== session) return;
     if (hasUnfinishedWork(conn)) {
       try {
         conn.transport.close();
@@ -1680,7 +1716,9 @@ async function doResubscribe() {
     const { session } = sub;
     // A session with a connection against it is already connected or building a transport.
     // Announcing again into that only restarts what is in progress.
-    if (busy.has(session) || session.transportLive) {
+    // And a device already connected by another way - met on the network and paired there -
+    // has nothing to be reached for; nudging its rendezvous only churns handshakes.
+    if (busy.has(session) || session.transportLive || app.conns.get(sub.peer?.id)?.state === 'ready') {
       sub.nudgedAt = 0;
       continue;
     }
@@ -1743,10 +1781,19 @@ function makeChannel(kind, label) {
     const known = await matchPairedHint(member.hints);
     if (known) {
       addAlso(known.id, kind);
-      // A member can become recognisable after we first met them, by pairing with us in the
-      // meantime. The channel conversation is then a duplicate of the paired one, so retire
-      // it rather than show the same device twice.
-      dropChannelPeer(member.idKey, { keepBusy: true });
+      /*
+       * A member can become recognisable after we first met them, by pairing with us in the
+       * meantime. A separate channel conversation is then a duplicate of the paired one, so it
+       * is retired rather than show the same device twice.
+       *
+       * Unless it *is* the paired one. Pairing on the network adopts the conversation already
+       * running under the new pairing's id, and the next announcement from that device carries
+       * the new hint. Retiring it then dropped a working connection a few seconds after every
+       * pairing, and the device sat "offline" until its rendezvous brought it back.
+       */
+      const entry = app.chanPeers.get(member.idKey);
+      const adopted = entry && [...app.conns.values()].some((c) => c.session === entry.session && c.peer?.id === known.id);
+      if (!adopted) dropChannelPeer(member.idKey, { keepBusy: true });
       render();
       return;
     }
@@ -2031,7 +2078,8 @@ const CHANNEL_ORDER = ['local', 'paired', 'room', 'code'];
 function channelsOf(entry) {
   const set = new Set(entry.channels || []);
   for (const c of app.alsoOn.get(entry.id) || []) set.add(c);
-  if (entry.verified) set.add('paired');
+  // Remembered, not merely checked this session: an offline record carries 'paired' already.
+  if (entry.peer) set.add('paired');
   if (set.size > 1) set.delete('code'); // "pairing by code" stops being interesting once it is one
   return CHANNEL_ORDER.filter((c) => set.has(c));
 }
@@ -2071,9 +2119,12 @@ function render() {
 
   const live = [...app.conns.values()].sort((a, b) => a.name.localeCompare(b.name));
   const liveIds = new Set(live.map((c) => c.id));
+  const strangers = live.filter((c) => !c.peer);
 
   const offline = app.paired
     .filter((p) => !liveIds.has(p.id))
+    // Not beside the same device live: see `staleTwin`.
+    .filter((p) => !staleTwin(p, strangers))
     .map((p) => ({
       id: p.id,
       name: p.name || 'Device',
@@ -2908,7 +2959,11 @@ async function setPeerPaused(id, paused) {
   paintDevicesDialog();
 }
 
-async function forgetDevice(id) {
+/**
+ * Unpair. `theirs` is the other device having unpaired from this one: its half is already
+ * gone, so there is nobody to ask, tell or wipe for.
+ */
+async function forgetDevice(id, { theirs = false } = {}) {
   /*
    * Unpairing is the one action that can strand an erase.
    *
@@ -2919,7 +2974,8 @@ async function forgetDevice(id) {
    * rather than after.
    */
   const rec = app.paired.find((p) => p.id === id);
-  if (rec?.wipePending && !confirm(t('devices.unpairStrands', { name: rec.name || t('tile.unnamed') }))) return;
+  if (!rec) return;
+  if (!theirs && rec.wipePending && !confirm(t('devices.unpairStrands', { name: rec.name || t('tile.unnamed') }))) return;
 
   /*
    * Unpairing is meant to leave nothing behind, and a conversation is the most of something
@@ -2927,18 +2983,40 @@ async function forgetDevice(id) {
    * still a connection to tell it over, and nothing is noted as owed: after this there is no
    * root left to reach it with.
    */
-  await destroyConversation(id, { tell: true, owe: false });
-  await peerStore.del(id);
-  for (const [key, sub] of app.pairSubs) {
-    if (sub.peer?.id !== id) continue;
-    sub.session.destroy();
-    app.pairSubs.delete(key);
+  await destroyConversation(id, { tell: !theirs, owe: false });
+
+  /*
+   * And the pairing, on both sides.
+   *
+   * Forgetting used to delete this half and leave the other device holding its own, which is
+   * the other way to end up with a device drawn twice over there: its remembered copy of this
+   * one stuck on "offline" beside this one turning up live. If the other device is not
+   * connected right now it cannot be told, and there is no root left afterwards to tell it
+   * with; its copy then waits until it meets this device again and is replaced.
+   */
+  const conn = app.conns.get(id);
+  if (!theirs && conn?.peer) {
+    try {
+      await conn.session.send({ t: 'unpair' });
+    } catch {
+      /* not reachable: this side still forgets */
+    }
   }
-  app.alsoOn.delete(id);
+
+  await removePairing(id);
   dropConn(id);
   await refreshPaired();
+  /*
+   * Say hello again on every channel, with hints that no longer include this pairing.
+   *
+   * The two devices may well still be side by side on the same network. Each recognised the
+   * other by its hints and so held no conversation of its own on the channel; with the pairing
+   * gone, that recognition is stale until the next beacon, and for up to half a minute neither
+   * shows the other at all. Changed hints are what make the other side look again.
+   */
+  for (const ch of Object.values(app.channels)) ch?.hello().catch(() => {});
   paintDevicesDialog();
-  toast(t('toast.forgotten'));
+  toast(theirs ? t('toast.unpairedBy', { name: rec.name || t('tile.unnamed') }) : t('toast.forgotten'));
 }
 
 function onTileClick(connId, wantFolder = false) {
@@ -3524,7 +3602,91 @@ async function resolveVerify(matched) {
     return;
   }
 
+  // Read on this screen, and they match. This conversation is trusted from here on, whatever
+  // the other device goes on to do, so anything waiting for that answer can go.
+  conn.sasCheckedFor = conn.sas;
+  conn.verified = true;
+  conn.wordsOk = true;
+
+  if (!conn.peer) {
+    /*
+     * Remembering is another matter: it takes both screens.
+     *
+     * Pairing is one root held twice. It used to be written here, the moment this screen said
+     * yes, with a request sent across asking the other device to do the same. When that went
+     * unanswered - the other tab reloaded, the link dropped, or a dialog was already up there
+     * and the request was dropped - this device kept a pairing the other had never heard of,
+     * and from then on showed that device twice: live, as the stranger it now was, and beside
+     * it a remembered copy stuck on "offline", because a rendezvous only one side knows about
+     * is one nobody else attends. Reopening the app did not clear it; it was on disk.
+     *
+     * So this says "done on my side", which is also what asks the other screen, and the
+     * pairing is written when both have. An older version of the app on the other end still
+     * works with this: it sends the same message once it has confirmed.
+     */
+    conn.session.send({ t: 'pair-ask' })?.catch?.(() => {});
+    if (conn.theirWordsOk) await rememberPair(conn);
+    else toast(t('toast.verifiedWaiting', { name: conn.name }), 'good');
+  }
+
+  render();
+  /*
+   * And now, last, whatever was picked for this device before the question was asked.
+   *
+   * It has to be last. Run any earlier — it used to run sixteen lines up, right after the
+   * pairing request — and `sendFiles` re-enters against a connection that is not yet marked
+   * verified, meets the gate it has just satisfied, and puts the files back on hold. The same
+   * question about the same device, and a send that silently never happens.
+   */
+  releaseHeldSend(conn);
+  // A request from another device that arrived while this question was on screen.
+  askNextPair();
+}
+
+/** The other device has confirmed its words; ask here, now if the screen is free. */
+function askToPair(conn) {
+  if (conn.peer || conn.wordsOk) return;
+  // Turned away while another dialog is up or before there are words to show. The flag it
+  // leaves is what `askNextPair` and the words arriving look for, so it is asked later.
+  promptVerify(conn, { force: true, asked: true });
+}
+
+function askNextPair() {
+  if (verifying) return;
+  for (const c of app.conns.values()) {
+    if (c.theirWordsOk && !c.wordsOk && !c.peer && c.sas) {
+      promptVerify(c, { force: true, asked: true });
+      return;
+    }
+  }
+}
+
+/** Same name, same kind of device. What a person reading the screen would call the same one. */
+function sameDevice(a, b) {
+  return (a.name || '') === (b.name || '') && (a.kind || 'laptop') === (b.kind || 'laptop');
+}
+
+/**
+ * A remembered device that is not answering, while the same device is right here unpaired.
+ *
+ * That is a pairing this side holds and the other does not: had the other device held it, it
+ * would have announced the matching hint and been recognised rather than met as a stranger.
+ * Drawing both is the same device twice, one of them offline for good, so the record waits
+ * off screen until the live one leaves, or is paired again and replaces it.
+ */
+function staleTwin(record, strangers) {
+  return strangers.some((c) => sameDevice(c, record));
+}
+
+/**
+ * Both screens have confirmed the words: write the pairing and adopt the connection under it.
+ */
+async function rememberPair(conn) {
+  if (conn.peer || conn.remembering) return;
+  conn.remembering = true;
   const root = await conn.session.derivePairRoot();
+  // The connection may have gone, or been replaced, while that was being derived.
+  if (conn.closed || app.conns.get(conn.id) !== conn) return;
   const id = toHex(root).slice(0, 16);
   const record = {
     id,
@@ -3536,18 +3698,6 @@ async function resolveVerify(matched) {
     at: Date.now(),
   };
   await savePeer(record);
-
-  /*
-   * And ask the other device to do the same.
-   *
-   * Pairing is one root held twice: this side derives it from the session key and so can the
-   * peer, but only if it is told to. Confirming alone left this device remembering one that
-   * had never heard of it - a tile stuck on "offline" beside the very peer it stood for,
-   * because a pairing the other end does not hold is a rendezvous nobody else attends.
-   *
-   * It is a request, not an instruction. The words still have to be read on that screen.
-   */
-  conn.session.send({ t: 'pair-ask' })?.catch?.(() => {});
 
   // Re-key the conn under its durable identity so the paired-device path adopts it.
   const oldId = conn.id;
@@ -3567,23 +3717,54 @@ async function resolveVerify(matched) {
   conn.channels.add('paired');
   app.conns.set(id, conn);
 
-  await refreshPaired();
-  app.radar.burst();
-  toast(t('toast.verified'), 'good');
-
   /*
-   * And now, last, whatever was picked for this device before the question was asked.
+   * Everything that was holding the old id moves with it.
    *
-   * It has to be last. Run any earlier — it used to run sixteen lines up, right after the
-   * pairing request — and `sendFiles` re-enters against a connection that is not yet marked
-   * verified, meets the gate it has just satisfied, and puts the files back on hold. The same
-   * question about the same device, and a send that silently never happens.
-   *
-   * The id moves with it. This function re-keys the connection under its pairing id, so a record
-   * held against the old one would be looking for a connection that no longer answers to it.
+   * This can now run at any moment - it waits for the other screen - including while the
+   * conversation with this device is open or a picture from it is on its way. Anything still
+   * addressed to the temporary id would be talking to a connection that no longer answers to it.
    */
   if (heldSend?.connId === oldId) heldSend.connId = id;
-  releaseHeldSend(conn);
+  if (chatPeerId === oldId) chatPeerId = id;
+  for (const note of chatTransfers.values()) if (note?.id === oldId) note.id = id;
+  await chat.adopt(oldId, id).catch(() => {});
+
+  await supersede(record);
+  await refreshPaired();
+  render();
+  app.radar.burst();
+  toast(t('toast.verified'), 'good');
+}
+
+/**
+ * Retire older pairings with the device just paired, when they are not answering.
+ *
+ * One-sided pairings were written by earlier versions of this app, and each one is a copy of
+ * a device stuck on "offline" beside the real thing. Pairing with that device again is the
+ * moment it can be tidied: the new pairing is held by both sides, and the old one, not
+ * answering while the device it names is right here, is the half the other side never had.
+ * Its conversation comes along, so nothing that was said is lost with it.
+ *
+ * One that is connected is answering, so it is a different device and is left alone. One whose
+ * conversation this browser cannot read is also left, because moving it would mean deleting it.
+ */
+async function supersede(record) {
+  for (const old of app.paired) {
+    if (old.id === record.id || app.conns.has(old.id) || !sameDevice(old, record)) continue;
+    if (!(await chat.adopt(old.id, record.id).catch(() => false))) continue;
+    await removePairing(old.id);
+  }
+}
+
+/** Delete a pairing record and stop listening for it. The conversation is the caller's business. */
+async function removePairing(id) {
+  await peerStore.del(id);
+  for (const [key, sub] of app.pairSubs) {
+    if (sub.peer?.id !== id) continue;
+    sub.session.destroy();
+    app.pairSubs.delete(key);
+  }
+  app.alsoOn.delete(id);
 }
 
 /* ───────────────────────────────── text ──────────────────────────────── */
