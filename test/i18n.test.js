@@ -387,6 +387,15 @@ test('no string uses a spaced dash to bolt on an explanation', () => {
   assert.deepEqual(offenders, [], 'these read as a label with an aside welded on');
 });
 
+test('German addresses the reader one way throughout', () => {
+  // Formal, as nearly all of it already was. A "du" beside a "Sie" reads as two translators.
+  const INFORMAL = /\b(du|dich|dir|dein\w*)\b|^(Bestätige|Versuche|Nimm|Öffne|Wähle|Tippe|Prüfe) /i;
+  const offenders = Object.entries(SHIPPED.de)
+    .filter(([, v]) => v.split(/(?<=[.!?])\s+/).some((s) => INFORMAL.test(s)))
+    .map(([k]) => k);
+  assert.deepEqual(offenders, [], 'these use "du" where the rest of the German uses "Sie"');
+});
+
 test('English says it the way it is spoken', () => {
   const STIFF = /\b(cannot|do not|does not|did not|is not|are not|will not|would not|should not|could not|has not|have not)\b/i;
   const offenders = Object.entries(EN).filter(([, v]) => STIFF.test(v)).map(([k]) => k);
