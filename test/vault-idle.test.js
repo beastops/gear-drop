@@ -77,6 +77,26 @@ test('activity puts the moment of locking back', async () => {
   assert.equal(vault.vaultMode(), 'protected');
 });
 
+/*
+ * Reading a secret is not somebody being there.
+ *
+ * Every message that arrives is stored, and storing it reads the conversation; so did every
+ * connection a paired device made. Counted as activity, anything another device did kept this
+ * one open: a phone left on a table, getting messages, never locked.
+ */
+test('what other devices do does not keep this one open', async () => {
+  const record = await vault.seal(new TextEncoder().encode('a message that arrived'));
+  const left = Date.now();
+  await new Promise((r) => setTimeout(r, 60));
+  await vault.unseal(record); // a message arriving, stored while nobody is looking
+  assert.equal(
+    vault.lockIfIdle(left + vault.AUTO_LOCK_MS + 30),
+    true,
+    'an incoming message kept a device nobody was using unlocked',
+  );
+  assert.equal(await vault.unlock('a passphrase long enough to be one', reseal), true, 'and it opens again');
+});
+
 /** Something real to lose access to, sealed while the vault is open. */
 let sealedEarlier = null;
 const SECRET = new TextEncoder().encode('the conversation, and who it was with');

@@ -3882,15 +3882,16 @@ body.theme-light .about-body {
    * whatever text is under the finger. On a page that is the right answer. Here it fights
    * the interface, because holding a tile is how a device menu opens now.
    *
-   * Off for the furniture, back on for the things people copy. A message, the prose in
-   * About and a pairing code are content. A tile, a banner and a toolbar are not.
+   * Off for the furniture, back on for the things people copy. The prose in About and a
+   * pairing code are content. A tile, a banner and a toolbar are not. A message is content
+   * too, but holding one is this app's own gesture - it opens the menu, and Copy is in it - so
+   * it stays off there, or the phone's selection and callout come up with the menu.
    */
   body {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
-  .bubble,
   .about-body,
   .about-detail,
   .code-display,

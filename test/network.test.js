@@ -199,3 +199,17 @@ test('and counts a rate limit against the party, not the subnet', () => {
   assert.match(worker, /const netKey = abuseKeyOf\(/, 'the socket limit is keyed by the grouping grain again');
   assert.match(worker, /networkOf\(addr\)/, 'and the label still groups by network');
 });
+
+test('the Node relay hands a client a keyed label for its network, never its address', () => {
+  /*
+   * The label is what the "this network" channel's secret is derived from, and that derivation
+   * has no key of its own. When the relay handed each client its plain address, anyone who knew
+   * a household's public address could compute the secret, join its channel, read who was there
+   * and appear in its list. It went out this way after the rate limit's key and the label were
+   * split, and the label was left pointing at the wrong one.
+   */
+  const server = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server', 'index.js'), 'utf8');
+  const creds = server.slice(server.indexOf('FRAME.ICE_CREDS'), server.indexOf('FRAME.ICE_CREDS') + 300);
+  assert.match(creds, /net: networkLabel\(req\)/);
+  assert.doesNotMatch(creds, /net: addressKey/);
+});

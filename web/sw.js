@@ -6,7 +6,7 @@
  * operating system hands one over through the share sheet, and even then it only carries
  * it across to the page. It is never uploaded, cached, or written anywhere.
  */
-const VERSION = 'gd-v2.88.0';
+const VERSION = 'gd-v2.89.0';
 const SHELL = [
   './',
   'index.html',
@@ -214,14 +214,14 @@ async function receiveShare(request) {
     const form = await request.formData();
     const files = form.getAll('files').filter((f) => f && typeof f !== 'string');
     const text = [form.get('title'), form.get('text'), form.get('url')].filter(Boolean).join('\n').trim();
+    /*
+     * Held for the page the redirect below loads, which asks for it as it starts.
+     *
+     * Not handed to a window already open: that window is the one the redirect replaces, or -
+     * one tab running at a time - the one the new page takes over from, which reloads. The
+     * files went with it, and the page that was left had nothing to ask for.
+     */
     pendingShare = { t: 'shared', files, text };
-    // A page may already be open; give it the share straight away.
-    const clients = await self.clients.matchAll({ type: 'window' });
-    if (clients.length) {
-      clients[0].postMessage(pendingShare);
-      pendingShare = null;
-      await clients[0].focus?.().catch?.(() => {});
-    }
   } catch {
     /* a malformed share is simply dropped */
   }

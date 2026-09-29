@@ -166,6 +166,8 @@ function dragToDismiss(el, o) {
 
   el.addEventListener('pointerdown', (e) => {
     if (!touchInput) return;
+    // A second finger is not a new drag, and must not strand the first one's half way.
+    if (e.isPrimary === false) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (o.canStart && !o.canStart(e)) return;
 
@@ -481,6 +483,8 @@ export function enableSwipeToDismiss(dialog) {
 
   dialog.addEventListener('pointerdown', (e) => {
     if (!touchInput) return;
+    // A second finger is not a new drag, and must not strand the first one's half way.
+    if (e.isPrimary === false) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     // A text field owns its own drag: selecting inside it is not a dismissal.
     if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;

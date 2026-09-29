@@ -549,8 +549,6 @@ const onUpgrade = (req, socket, head) => {
 server.on('upgrade', onUpgrade);
 
 wss.on('connection', (ws, req) => {
-  const addressKey = ws.addressKey;
-
   ws.tags = new Set();
   ws.bucket = new Bucket();
   ws.isAlive = true;
@@ -580,12 +578,14 @@ wss.on('connection', (ws, req) => {
   ws.on('close', release);
   ws.on('error', release);
 
-  // Hand the client fresh ICE servers on connect; tag is all-zero (not tag-scoped).
+  // Hand the client fresh ICE servers on connect; tag is all-zero (not tag-scoped). And the
+  // label of its network: keyed and rotating, never the address, since the "this network"
+  // channel's secret is derived from it and anyone who could compute the label could join.
   ws.send(
     frame(
       FRAME.ICE_CREDS,
       Buffer.alloc(16),
-      Buffer.from(JSON.stringify({ ...iceServers(conf), net: addressKey === 'unknown' ? null : addressKey }), 'utf8'),
+      Buffer.from(JSON.stringify({ ...iceServers(conf), net: networkLabel(req) }), 'utf8'),
     ),
   );
 });

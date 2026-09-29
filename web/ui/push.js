@@ -33,6 +33,9 @@ export function enableEdgeBack(dialog, { isPushed = () => true, onProgress = () 
   dialog.addEventListener(
     'pointerdown',
     (e) => {
+      // A second finger is not a new drag. It used to reset the first one's, and the page stayed
+      // wherever the first finger had dragged it.
+      if (e.isPrimary === false) return;
       start = null;
       if (!isPushed() || e.pointerType === 'mouse' || e.clientX > EDGE_PX) return;
       start = { x: e.clientX, y: e.clientY, id: e.pointerId };

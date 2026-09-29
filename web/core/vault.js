@@ -12,7 +12,7 @@
  * Where a browser refuses to store a CryptoKey the fallback is memory-only, so pairings are
  * dropped on reload rather than written in the clear.
  */
-import { kv } from './store.js';
+import { kv, commit } from './store.js';
 
 const subtle = globalThis.crypto?.subtle;
 const SLOT = 'vault-key-v1';
@@ -115,7 +115,8 @@ export async function unseal(rec) {
   if (!rec || rec.v !== 1 || !rec.iv || !rec.ct) return null;
   const key = await vaultKey();
   if (!key) return null;
-  touch();
+  // Not counted as somebody being here: every message another device sends is stored, and
+  // storing reads the conversation, so a device left on a table getting messages never locked.
   try {
     const pt = await subtle.decrypt(
       { name: 'AES-GCM', iv: Uint8Array.from(rec.iv) },
@@ -357,8 +358,8 @@ export async function unlock(passphrase, reseal) {
     try {
       const salt = crypto.getRandomValues(new Uint8Array(16));
       const next = await deriveScrypt(passphrase, salt, LOCK_SCRYPT);
-      await reseal(key, next);
-      await kv.set(LOCK, scryptRecord(salt, await makeCheck(next)));
+      const lock = scryptRecord(salt, await makeCheck(next));
+      await changeKey(key, next, reseal, [{ store: 'kv', op: 'put', key: LOCK, value: lock }]);
       lockRecord = await kv.get(LOCK);
       keyPromise = Promise.resolve(next);
     } catch {
@@ -381,21 +382,23 @@ export function lockNow() {
  *
  * Every one of these changes which key the records are sealed under, so every one of them
  * has to re-seal what is already stored. `reseal` is handed the old key and the new one and
- * is expected to rewrite every record. If it throws, nothing is committed and the vault is
- * left as it was, because a half-converted database has records nobody can open.
+ * returns the writes that move every record across; they are committed in one step with the
+ * record of the new key (`changeKey`). If anything fails, nothing is committed and the vault
+ * is left as it was, because a half-converted database has records nobody can open.
  */
 export async function setPassphrase(passphrase, reseal) {
   if (!subtle?.deriveKey) throw new Error('no key derivation here');
   const old = await vaultKey();
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const next = await deriveScrypt(passphrase, salt, LOCK_SCRYPT);
+  const lock = scryptRecord(salt, await makeCheck(next));
 
-  await reseal(old, next);
-
-  await kv.set(LOCK, scryptRecord(salt, await makeCheck(next)));
-  // The stored handle is what a browser could have used on its own. It goes last, once the
-  // records it protected are already readable under the passphrase instead.
-  await kv.del(SLOT).catch(() => {});
+  // The stored handle is what a browser could have used on its own. It goes in the same step
+  // as the records it protected move under the passphrase - not before, and not after.
+  await changeKey(old, next, reseal, [
+    { store: 'kv', op: 'put', key: LOCK, value: lock },
+    { store: 'kv', op: 'delete', key: SLOT },
+  ]);
 
   lockRecord = await kv.get(LOCK);
   lockLoaded = true;
@@ -413,11 +416,11 @@ export async function clearPassphrase(passphrase, reseal) {
   if (!(await verify(current, rec.check))) return false;
 
   const fresh = await makeKey();
-  await reseal(current, fresh);
-
-  await kv.set(SLOT, fresh);
+  await changeKey(current, fresh, reseal, [
+    { store: 'kv', op: 'put', key: SLOT, value: fresh },
+    { store: 'kv', op: 'delete', key: LOCK },
+  ]);
   const back = await kv.get(SLOT);
-  await kv.del(LOCK).catch(() => {});
 
   lockRecord = null;
   lockLoaded = true;
@@ -435,14 +438,38 @@ export async function changePassphrase(current, next, reseal) {
 
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const then = await deriveScrypt(next, salt, LOCK_SCRYPT);
-  await reseal(now, then);
-
-  await kv.set(LOCK, scryptRecord(salt, await makeCheck(then)));
+  const lock = scryptRecord(salt, await makeCheck(then));
+  await changeKey(now, then, reseal, [{ store: 'kv', op: 'put', key: LOCK, value: lock }]);
   lockRecord = await kv.get(LOCK);
   keyPromise = Promise.resolve(then);
   mode = 'protected';
   touch();
   return true;
+}
+
+/**
+ * Move every record to a new key, and the vault's own record of which key, in one step.
+ *
+ * `reseal` is handed the old key and the new one and returns the writes that move the records
+ * across; nothing is written until all of them, and `own` - the lock record, the stored handle
+ * - are committed together. A failure anywhere leaves everything under the old key, which is
+ * still the key on record. Written one at a time, a failure part way left records under a key
+ * nothing recorded, this device's identity among them.
+ *
+ * And while it runs, anything else that wants the key - a message arriving, a pairing saved -
+ * waits for the answer instead of sealing under the old key a moment before the switch.
+ */
+async function changeKey(oldKey, newKey, reseal, own) {
+  let settle;
+  keyPromise = new Promise((resolve) => (settle = resolve));
+  try {
+    const moved = typeof reseal === 'function' ? await reseal(oldKey, newKey) : [];
+    await commit([...(Array.isArray(moved) ? moved : []), ...own]);
+    settle(newKey);
+  } catch (err) {
+    settle(oldKey);
+    throw err;
+  }
 }
 
 /* ---- re-sealing needs to read and write under a key that is not the current one ---- */
@@ -473,7 +500,10 @@ export async function unsealWith(key, rec) {
 
 let idleAt = 0;
 
-/** Mark the vault as in use. Called on unlock and whenever a secret is read. */
+/**
+ * Mark the vault as in use. Called on unlock and on real input (`noteActivity`) - not on
+ * reading a secret, which other devices cause as often as the person does.
+ */
 function touch() {
   idleAt = Date.now();
 }

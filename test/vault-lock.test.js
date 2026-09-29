@@ -218,11 +218,10 @@ test('an old vault is moved across on the way in, not left behind', async () => 
   );
   const unlock = src.slice(src.indexOf('export async function unlock('), src.indexOf('\n}', src.indexOf('export async function unlock(')));
   assert.match(unlock, /rec\.v === 1 && typeof reseal === 'function'/, 'no upgrade on unlock');
-  // The new record is written only after everything has been re-sealed under the new key, so
-  // an interruption leaves a vault that still opens with the same passphrase.
-  const resealAt = unlock.indexOf('await reseal(');
-  const writeAt = unlock.indexOf('kv.set(LOCK');
-  assert.ok(resealAt > 0 && writeAt > resealAt, 'the lock is replaced before the data is moved');
+  // The new record is written in the same step as everything re-sealed under the new key, so an
+  // interruption leaves a vault that still opens with the same passphrase. See `changeKey`.
+  assert.match(unlock, /await changeKey\(key, next, reseal, \[\{ store: 'kv', op: 'put', key: LOCK, value: lock \}\]\)/, 'the lock is replaced apart from the data');
+  assert.doesNotMatch(unlock, /kv\.set\(LOCK/, 'the lock is still written on its own');
 });
 
 test('scrypt derives the same key twice and a different one per salt', async () => {
@@ -241,4 +240,17 @@ test('scrypt derives the same key twice and a different one per salt', async () 
   assert.deepEqual(one, two, 'the same inputs gave different keys');
   assert.notDeepEqual(one, other, 'the salt changed nothing');
   assert.ok(LOCK_SCRYPT.N > cheap.N, 'the shipped cost is not the test cost');
+});
+
+test('the lock screen cannot be closed with nothing behind it', async () => {
+  // Escape, or Android's Back, closed it before the app had started; the unlock never came,
+  // and the person was left with an empty page until a reload.
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const main = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'main.js'), 'utf8');
+  const ask = main.slice(main.indexOf('async function askToUnlock()'), main.indexOf('function suggestPassphrase('));
+  assert.match(ask, /ui\.lockDialog\.addEventListener\('cancel', keep\)/);
+  assert.match(ask, /ui\.lockDialog\.addEventListener\('close', reopen\)/);
+  assert.match(ask, /const reopen = \(\) => \{\s*if \(!unlocked && !ui\.lockDialog\.open\) ui\.lockDialog\.showModal\(\);/);
 });

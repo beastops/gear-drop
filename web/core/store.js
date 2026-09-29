@@ -210,6 +210,70 @@ export const transfers = {
   all: () => tx('transfers', 'readonly', (s) => s.getAll()),
 };
 
+/**
+ * Several writes, across stores, made as one: all of them, or none.
+ *
+ * For the one change that must never be half done - moving every record to a new vault key,
+ * together with the record that says which key they are under. Written one at a time, a
+ * failure part way left records under a key nothing recorded, and this device's own identity
+ * among them. Each op is `{ store, op: 'put' | 'delete', key?, value? }`; `key` for `kv`, whose
+ * records do not carry their own.
+ *
+ * Checked whole before anything is written. Without a database, where there is nothing a
+ * write can fail on, they go through the stores' own functions one after another.
+ */
+const COMMITTABLE = { kv, peers, chats, attachments };
+
+export async function commit(ops) {
+  const list = (ops || []).filter(Boolean);
+  for (const o of list) {
+    if (!COMMITTABLE[o.store] || (o.op !== 'put' && o.op !== 'delete')) {
+      throw new Error(`cannot commit ${o.op} to ${o.store}`);
+    }
+  }
+  if (!list.length) return;
+
+  let db = null;
+  try {
+    db = await openDb();
+  } catch {
+    persistent = false;
+  }
+  if (!db) {
+    for (const o of list) {
+      const s = COMMITTABLE[o.store];
+      if (o.op === 'delete') await s.del(o.key);
+      else if (o.store === 'kv') await s.set(o.key, o.value);
+      else await s.put(o.value);
+    }
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    let t;
+    try {
+      t = db.transaction([...new Set(list.map((o) => o.store))], 'readwrite');
+      for (const o of list) {
+        const s = t.objectStore(o.store);
+        if (o.op === 'delete') s.delete(o.key);
+        else if (o.store === 'kv') s.put(o.value, o.key);
+        else s.put(o.value);
+      }
+    } catch (e) {
+      try {
+        t?.abort();
+      } catch {
+        /* never started */
+      }
+      reject(e);
+      return;
+    }
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('commit aborted'));
+  });
+}
+
 /** Ask the browser to keep our data through storage pressure (matters for OPFS sinks). */
 export async function requestPersistence() {
   try {
@@ -278,8 +342,19 @@ export async function wipe() {
    * Recursive, and by handle rather than by name, because a partial transfer can leave a
    * directory behind and `remove({ recursive: true })` is not available everywhere this runs.
    */
+  /*
+   * A browser without this storage - or one that refuses it, as private windows do - never had
+   * anything in it: received files go to memory there, through this same call. Counting it as a
+   * failure meant the erase never finished on those browsers, however often it was tried.
+   */
+  let root = null;
   try {
-    const root = await navigator.storage?.getDirectory?.();
+    root = (await navigator.storage?.getDirectory?.()) || null;
+  } catch {
+    root = null;
+  }
+  if (!root) done.files = true;
+  try {
     if (root) {
       for await (const [name, handle] of root.entries()) {
         try {
@@ -291,7 +366,7 @@ export async function wipe() {
       done.files = true;
     }
   } catch {
-    /* no OPFS here */
+    /* enumerating failed part way: that one is a real failure */
   }
 
   // 3. Theme, language, and the chosen relay.
@@ -304,13 +379,15 @@ export async function wipe() {
   }
 
   // 4. The cached application shell. Not secret, but "everything" has to mean everything.
+  // The same rule: no Cache Storage, or none allowed here, is nothing cached.
+  if (!globalThis.caches?.keys) done.caches = true;
   try {
     if (globalThis.caches?.keys) {
       for (const key of await caches.keys()) await caches.delete(key);
       done.caches = true;
     }
-  } catch {
-    /* ignore */
+  } catch (err) {
+    if (err?.name === 'SecurityError') done.caches = true;
   }
 
   // 5. And the worker itself, so nothing survives to re-seed a cache after the reload.

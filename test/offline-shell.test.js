@@ -144,3 +144,25 @@ test('a cached file is served without asking the host for it again', () => {
   const fetchAt = handler.indexOf('fetch(e.request)');
   assert.ok(fetchAt > hitAt, 'there is a fetch that can run even when the cache answered');
 });
+
+test('an open app takes a new version the next time it is out of sight, and says which it runs', () => {
+  /*
+   * The worker takes a new build at once, but the page on screen is still the old one, and a
+   * phone that is resumed rather than relaunched kept showing it - a title removed in one release
+   * was still there after it. Meanwhile About read the version off the server and reported the
+   * new one, so it could never say that this copy was the old one.
+   */
+  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const version = /const VERSION = '([^']+)'/.exec(sw)[1];
+  assert.equal(/const BUILD = '([^']+)'/.exec(main)?.[1], version, 'the page and the worker disagree on the version');
+  assert.match(main, /addEventListener\('controllerchange'/);
+  const idle = main.slice(main.indexOf('function reloadIfIdle()'), main.indexOf('function reloadIfIdle()') + 900);
+  assert.match(idle, /document\.hidden/);
+  assert.match(idle, /transferInFlight\(\)/);
+  assert.match(idle, /location\.reload\(\)/);
+  // A resumed app looks for one too, rather than waiting to be relaunched.
+  assert.match(main, /getRegistration\(\)[\s\S]{0,40}\.update\(\)/);
+  const about = main.slice(main.indexOf('async function showBuild()'), main.indexOf('function watchModals()'));
+  assert.match(about, /BUILD/);
+});

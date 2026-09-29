@@ -327,6 +327,12 @@ const app = {
 /** Back closes what is in front, a menu before the sheet under it. See `ui/back.js`. */
 const back = createBackStack();
 
+/**
+ * The build this page is. Shipped inside the page, so it is the copy actually running rather
+ * than whatever the server has most recently; kept equal to the worker's VERSION by a test.
+ */
+const BUILD = 'gd-v2.89.0';
+
 /** The resting tab icon, remembered before the progress ring ever replaces it. */
 let baseFavicon = null;
 
@@ -657,12 +663,14 @@ async function resealVault(oldKey, newKey) {
     return moved ? out : null;
   };
 
-  const writes = [];
+  // Prepared here and written by the vault, all in one commit together with the record of the
+  // new key. See `changeKey` in vault.js.
+  const ops = [];
 
   // The device's own key, which is what every pairing is anchored to.
   const device = await kv.get('device');
   const movedDevice = await move(device);
-  if (movedDevice) writes.push(() => kv.set('device', movedDevice));
+  if (movedDevice) ops.push({ store: 'kv', op: 'put', key: 'device', value: movedDevice });
 
   /*
    * And the preferences, which carry the sealed room code.
@@ -673,13 +681,13 @@ async function resealVault(oldKey, newKey) {
    */
   const prefs = await kv.get('prefs');
   const movedPrefs = await move(prefs);
-  if (movedPrefs) writes.push(() => kv.set('prefs', movedPrefs));
+  if (movedPrefs) ops.push({ store: 'kv', op: 'put', key: 'prefs', value: movedPrefs });
 
   // Paired devices, and the conversations held with them.
-  for (const store of [peerStore, chats]) {
+  for (const [name, store] of [['peers', peerStore], ['chats', chats]]) {
     for (const rec of await store.all()) {
       const moved = await move(rec);
-      if (moved) writes.push(() => store.put(moved));
+      if (moved) ops.push({ store: name, op: 'put', value: moved });
     }
   }
 
@@ -687,12 +695,11 @@ async function resealVault(oldKey, newKey) {
   // place here large enough that loading all of it at once would matter.
   for (const id of await attachments.keys()) {
     const moved = await move(await attachments.get(id));
-    if (moved) writes.push(() => attachments.put(moved));
+    if (moved) ops.push({ store: 'attachments', op: 'put', value: moved });
   }
 
-  for (const write of writes) await write();
   if (stranded) console.warn(`vault: ${stranded} record(s) could not be moved`);
-  return writes.length;
+  return ops;
 }
 
 /**
@@ -3535,7 +3542,7 @@ async function sendFiles(connId, fileList) {
    * attachment all arrive here; put on any one of them, the other three would be the hole.
    */
   if (!conn.verified && !sasConfirmed(conn)) {
-    heldSend = { connId, files };
+    heldSends.push({ connId, files });
     promptVerify(conn, { force: true });
     return;
   }
@@ -3958,13 +3965,14 @@ function closeRoomInvite() {
 let verifying = null;
 
 /**
- * Files picked for a device whose words have not been read yet.
+ * What was picked for devices whose words have not been read yet: files, pictures, recordings.
  *
- * Held here for as long as the question is on screen, so that answering it sends what was
- * already chosen instead of asking for it again. Cleared whichever way the question is answered,
- * and on any other path out, so a refused check cannot leave a send queued behind it.
+ * Held for as long as the question is on screen, so that answering it sends what was already
+ * chosen instead of asking for it again. A list, each entry for its own device: one slot held
+ * only the last pick, and two picks for a device still connecting sent the second and dropped
+ * the first without a word.
  */
-let heldSend = null;
+let heldSends = [];
 
 /**
  * Deal with whatever was waiting, now that a question has been answered.
@@ -3979,29 +3987,30 @@ let heldSend = null;
  * and the file you picked for another is waiting on a question nobody will ever ask.
  */
 function releaseHeldSend(answered) {
-  if (!heldSend) return;
+  if (!heldSends.length) return;
   // Files go as files; a picture or a recording from the conversation goes back into it.
   const send = (w) => (w.media ? sendChatMedia(w.connId, w.media, w.opts) : w.files?.length && sendFiles(w.connId, w.files));
 
-  if (heldSend.connId === answered.id) {
-    const waiting = heldSend;
-    heldSend = null;
-    send(waiting);
-    return;
+  const waiting = heldSends;
+  heldSends = [];
+  let asking = false;
+  for (const w of waiting) {
+    // The device the answer was about: its words were just read.
+    if (w.connId === answered.id) {
+      send(w);
+      continue;
+    }
+    const other = app.conns.get(w.connId);
+    if (!other) continue; // gone: nothing to send to, and nothing to ask
+    if (!other.verified && !sasConfirmed(other)) {
+      heldSends.push(w);
+      // One question at a time; its answer comes back here for the next.
+      if (!asking) promptVerify(other, { force: true });
+      asking = true;
+      continue;
+    }
+    send(w);
   }
-
-  const other = app.conns.get(heldSend.connId);
-  if (!other) {
-    heldSend = null;
-    return;
-  }
-  if (!other.verified && !sasConfirmed(other)) {
-    promptVerify(other, { force: true });
-    return;
-  }
-  const waiting = heldSend;
-  heldSend = null;
-  send(waiting);
 }
 
 function promptVerify(conn, { force = false, asked = false } = {}) {
@@ -4034,8 +4043,8 @@ async function resolveVerify(matched) {
   if (!matched) {
     // Whatever was waiting for *this* device is not going anywhere. Anything held for another
     // one is none of this answer's business and stays where it is.
-    if (heldSend?.connId === conn.id) heldSend = null;
-    else releaseHeldSend(conn);
+    heldSends = heldSends.filter((w) => w.connId !== conn.id);
+    releaseHeldSend(conn);
     await destroyConversation(conn.id, { tell: true });
     toast(t('chat.wipedUnverified'), 'bad');
     dropConn(conn.id);
@@ -4164,7 +4173,7 @@ async function rememberPair(conn) {
    * conversation with this device is open or a picture from it is on its way. Anything still
    * addressed to the temporary id would be talking to a connection that no longer answers to it.
    */
-  if (heldSend?.connId === oldId) heldSend.connId = id;
+  for (const w of heldSends) if (w.connId === oldId) w.connId = id;
   if (chatPeerId === oldId) chatPeerId = id;
   if (waitingSends.has(oldId)) {
     waitingSends.set(id, waitingSends.get(oldId));
@@ -4502,6 +4511,9 @@ function onHold(el, open) {
     el.classList.add('pressing');
     timer = setTimeout(() => {
       cancel();
+      // Redrawn under the finger - a message arrived mid-hold - so this row is not on screen,
+      // and a menu for it would open measured at nothing, in the corner.
+      if (!el.isConnected) return;
       fired = true;
       navigator.vibrate?.(12);
       open();
@@ -5017,6 +5029,8 @@ function startReply(m) {
 function cancelReply() {
   replyTo = null;
   if (ui.chatReply) ui.chatReply.hidden = true;
+  // Hidden is still in the page; the quoted words go too.
+  if (ui.chatReplyText) ui.chatReplyText.textContent = '';
 }
 
 /** A line that stands for a message in a quote. Words from this side's own copy only. */
@@ -5083,7 +5097,15 @@ function onPeek(log) {
   let start = null;
   let active = false;
   log.addEventListener('pointerdown', (e) => {
+    // A second finger is not a new gesture, and must not strand the first one's.
+    if (e.isPrimary === false) return;
     start = null;
+    // Anything a gesture the sheet took over left behind goes before a new one starts.
+    if (!active && log.classList.contains('peeking')) {
+      log.classList.remove('peeking');
+      log.style.removeProperty('--peek');
+      log.style.removeProperty('--peek-p');
+    }
     if (e.pointerType === 'mouse' || e.target.closest?.('button:not(.bubble-quote), a, input, .audio-track')) return;
     start = { x: e.clientX, y: e.clientY, id: e.pointerId };
     active = false;
@@ -5110,6 +5132,9 @@ function onPeek(log) {
     const pull = Math.min(PEEK_PX, -mx);
     log.style.setProperty('--peek', `${(-Math.max(0, pull)).toFixed(1)}px`);
     log.style.setProperty('--peek-p', (Math.max(0, pull) / PEEK_PX).toFixed(3));
+    // Ours from here: the sheet under it must not take the same finger when it turns, which
+    // left the log peeked until the next full swipe.
+    e.stopPropagation();
     if (e.cancelable) e.preventDefault();
   });
   const end = (e) => {
@@ -5123,6 +5148,7 @@ function onPeek(log) {
   };
   log.addEventListener('pointerup', end);
   log.addEventListener('pointercancel', end);
+  log.addEventListener('lostpointercapture', end);
 }
 
 /**
@@ -5143,6 +5169,7 @@ function onSwipeReply(row, reply) {
   let swallow = false;
 
   row.addEventListener('pointerdown', (e) => {
+    if (e.isPrimary === false) return; // a second finger is not a new swipe
     swallow = false;
     if (e.pointerType === 'mouse' || e.target.closest?.('button:not(.bubble-quote), a, input, .audio-track')) return;
     // The left edge of a phone's full-screen conversation is the way back, not a reply.
@@ -5176,6 +5203,8 @@ function onSwipeReply(row, reply) {
     const shown = dx <= REPLY_AT ? dx : REPLY_AT + (dx - REPLY_AT) * 0.3;
     row.style.translate = `${shown.toFixed(1)}px 0`;
     row.style.setProperty('--reply', Math.min(1, dx / REPLY_AT).toFixed(3));
+    // Ours from here, or the sheet takes the finger when it turns and the message stays out.
+    e.stopPropagation();
     if (!armed && dx >= REPLY_AT) {
       armed = true;
       navigator.vibrate?.(10);
@@ -5200,6 +5229,7 @@ function onSwipeReply(row, reply) {
   };
   row.addEventListener('pointerup', end);
   row.addEventListener('pointercancel', end);
+  row.addEventListener('lostpointercapture', end);
   row.addEventListener(
     'click',
     (e) => {
@@ -5276,8 +5306,10 @@ async function deleteMessages(peerId, list) {
  */
 function dissolveBubbles(ids, { messages, locked = false, ephemeral = false }) {
   const gone = new Set(ids);
-  // Answering a message that is no longer there answers nothing.
+  // Answering a message that is no longer there answers nothing, and a menu held open on it
+  // must not keep its words on screen, or copy them, or reply to them.
   if (replyTo && gone.has(replyTo.id)) cancelReply();
+  if (openMenu && gone.has(openMenu.tile?.dataset.id)) closeMenu();
   const rows = [...ui.chatLog.children].filter((el) => gone.has(el.dataset.id));
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -6477,6 +6509,7 @@ async function destroyConversation(id, { tell = false, owe = true } = {}) {
     // of one of its messages must not stay above the keyboard.
     chatToken++;
     cancelReply();
+    if (openMenu && ui.chatDialog.contains(openMenu.el)) closeMenu();
     releaseMedia();
     renderChat([]);
     paintChatState();
@@ -6503,7 +6536,7 @@ async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
   // The same gate as `sendFiles`, for the same reason: a picture or a recording you chose is
   // what somebody in the middle would want, and it waits for the words like any file does.
   if (!conn.verified && !sasConfirmed(conn)) {
-    heldSend = { connId: peerId, media: file, opts: { voice, dur } };
+    heldSends.push({ connId: peerId, media: file, opts: { voice, dur } });
     promptVerify(conn, { force: true });
     return;
   }
@@ -7332,6 +7365,8 @@ function bindUi() {
     cancelRecording();
     // Nor a recording playing, with no player on screen left to stop it.
     for (const a of ui.chatLog.querySelectorAll('audio')) a.pause();
+    // Nor a menu held open on one of its messages - a swipe back from the edge goes past it.
+    closeMenu();
     releaseMedia();
     chatToken++;
   });
@@ -7495,7 +7530,13 @@ function bindUi() {
    */
   addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    closeMenu();
+    // A menu in front is all Escape closes, as with Back. It used to go on and close the
+    // conversation under a message menu too, or drop the files picked under a device menu.
+    if (openMenu) {
+      closeMenu();
+      e.preventDefault();
+      return;
+    }
 
     const top = topModal();
     if (top) {
@@ -7535,28 +7576,28 @@ let modalStack = [];
  * submit, and a path added later cannot forget to tell it.
  */
 /**
- * Ask the worker which build is actually running this page.
+ * Say which build is running this page, and whether a newer one is waiting.
  *
- * Not the version in the markup: that is what the server most recently sent, and the point of
- * the question is whether this browser is showing that or something it cached earlier. The
- * worker's own version is the one that answers it, and a page with no worker says so.
+ * The page's own, not the server's: the point of the question is whether this browser is
+ * showing the latest or something it kept, and reading the version off the server answered
+ * "the latest" every time, including when the page on screen was the build before.
  */
 async function showBuild() {
   const el = document.getElementById('about-build');
   if (!el) return;
   try {
     const reg = await navigator.serviceWorker?.getRegistration?.();
-    const active = reg?.active;
-    if (!active) {
-      el.textContent = 'live, no offline copy';
+    if (!reg?.active) {
+      el.textContent = `${BUILD}, live, no offline copy`;
     } else {
       const res = await fetch('sw.js', { cache: 'no-store' });
-      const served = /const VERSION = '([^']+)'/.exec(await res.text())?.[1] || 'unknown';
-      el.textContent = served;
+      const served = /const VERSION = '([^']+)'/.exec(await res.text())?.[1];
+      el.textContent = served && served !== BUILD ? `${BUILD} (${served} next time)` : BUILD;
     }
     el.hidden = false;
   } catch {
-    /* nothing to say is better than a wrong answer */
+    el.textContent = BUILD;
+    el.hidden = false;
   }
 }
 
@@ -7938,6 +7979,19 @@ async function askToUnlock() {
   setTimeout(() => ui.lockPass.focus(), 60);
 
   /*
+   * It cannot be closed: behind it is an app that has not started. Escape, or Android's Back,
+   * closed it anyway, the unlock never came, and the page sat empty until a reload. Refused
+   * where the browser lets it be refused, and opened again where it does not.
+   */
+  let unlocked = false;
+  const keep = (e) => e.preventDefault();
+  const reopen = () => {
+    if (!unlocked && !ui.lockDialog.open) ui.lockDialog.showModal();
+  };
+  ui.lockDialog.addEventListener('cancel', keep);
+  ui.lockDialog.addEventListener('close', reopen);
+
+  /*
    * And the way out for someone who cannot get in.
    *
    * A forgotten passphrase is not recoverable, which is the point of it, so the only thing
@@ -7971,6 +8025,9 @@ async function askToUnlock() {
       // The passphrase does not stay in the field for the next person at this machine.
       ui.lockPass.value = '';
       ui.lockForm.removeEventListener('submit', onSubmit);
+      unlocked = true;
+      ui.lockDialog.removeEventListener('cancel', keep);
+      ui.lockDialog.removeEventListener('close', reopen);
       ui.lockDialog.close();
       resolve(true);
     });
@@ -8157,9 +8214,10 @@ function watchIdleLock() {
     if (vault.lockIfIdle()) location.reload();
   };
 
-  // Real input is what "still here" means. `unseal` already advances the clock, which covers
-  // reading a conversation and misses everything else somebody does in front of the app.
-  for (const event of ['pointerdown', 'keydown']) {
+  // Real input is what "still here" means, and only that: reading a secret is not, since other
+  // devices cause it - a message arriving is stored. A wheel counts, so reading back through a
+  // conversation with a trackpad is being here; a scroll does not, since a new message scrolls.
+  for (const event of ['pointerdown', 'keydown', 'wheel']) {
     addEventListener(event, () => vault.noteActivity(), { passive: true, capture: true });
   }
 
@@ -8327,6 +8385,35 @@ if ('serviceWorker' in navigator) {
       .then((reg) => reg.active?.postMessage({ t: 'want-shared' }))
       .catch(() => {});
   })();
+
+  /*
+   * A new version, taken the next time nobody is looking.
+   *
+   * The worker takes a new build as soon as it has one, but the page on screen is still the old
+   * one, and a phone that is resumed rather than relaunched went on showing it - a change shipped
+   * in one release was still missing after it. Reloaded when the page is next out of sight, and
+   * only if nothing would be lost by it: nothing moving, nothing picked, nothing typed or being
+   * recorded, and no passphrase to ask for again on the way back.
+   *
+   * And a resumed app looks for a new version, rather than waiting to be relaunched to.
+   */
+  const hadController = !!navigator.serviceWorker.controller;
+  let updateReady = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return; // the first install, not an update
+    updateReady = true;
+    reloadIfIdle();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) reloadIfIdle();
+    else navigator.serviceWorker.getRegistration().then((reg) => reg?.update()).catch(() => {});
+  });
+  async function reloadIfIdle() {
+    if (!updateReady || !document.hidden) return;
+    if (transferInFlight() || app.staged || ui.chatInput?.value || recorder) return;
+    if (await vault.hasPassphrase().catch(() => true)) return;
+    if (document.hidden) location.reload();
+  }
 
   // Files handed over by the system share sheet arrive here, from the worker.
   navigator.serviceWorker.addEventListener('message', (e) => {

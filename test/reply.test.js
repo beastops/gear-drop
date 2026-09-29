@@ -140,3 +140,63 @@ test('a quote waiting to be sent goes when the message it quotes does', () => {
   assert.match(body('async function destroyConversation(id, { tell = false, owe = true } = {})'), /cancelReply\(\)/);
   assert.match(body('function dissolveBubbles(ids, { messages, locked = false, ephemeral = false })'), /if \(replyTo && gone\.has\(replyTo\.id\)\) cancelReply\(\)/);
 });
+
+/* ─────────────── gestures that got in each other's way ─────────────── */
+
+test('Escape closes the menu in front, and only that', () => {
+  // With a message menu open over the conversation, one Escape closed both - the menu and the
+  // conversation under it - and on the main screen it also threw away files picked to send.
+  const esc = MAIN.slice(MAIN.indexOf("if (e.key !== 'Escape') return;"), MAIN.indexOf("ui.peers.addEventListener('scroll', closeMenu"));
+  assert.match(esc, /if \(openMenu\) \{\s*closeMenu\(\);\s*e\.preventDefault\(\);\s*return;\s*\}/);
+});
+
+test('a menu goes with the message or the conversation it was opened on', () => {
+  // The lifted copy in the hold menu kept a deleted message's words on screen, and its Reply
+  // and Copy still worked on them.
+  const dissolve = body('function dissolveBubbles(ids, { messages, locked = false, ephemeral = false })');
+  assert.match(dissolve, /if \(openMenu && gone\.has\(openMenu\.tile\?\.dataset\.id\)\) closeMenu\(\);/);
+  assert.match(body('async function destroyConversation(id, { tell = false, owe = true } = {})'), /closeMenu\(\)/);
+  // And the words of a cancelled quote do not stay in the page, hidden.
+  assert.match(body('function cancelReply()'), /ui\.chatReplyText\.textContent = ''/);
+  // Every way of closing the conversation takes its menu with it - a swipe back from the edge too.
+  const close = MAIN.slice(MAIN.indexOf("ui.chatDialog.addEventListener('close', () => {\n    // A sheet that closes mid-recording"));
+  assert.match(close.slice(0, close.indexOf('});')), /closeMenu\(\)/);
+});
+
+test('a hold on a message that was redrawn under the finger opens nothing', () => {
+  // A message arriving mid-hold rebuilt the log; the timer then opened a menu for the old row,
+  // measured at nothing, at the top-left corner of the screen.
+  assert.match(body('function onHold(el, open)'), /if \(!el\.isConnected\) return;/);
+});
+
+test('a second finger does not strand a drag half way', () => {
+  // A second touch reset the first finger's gesture, and the page, the conversation or the
+  // message stayed where it had been dragged to.
+  const PUSH = fs.readFileSync(path.join(ROOT, 'web', 'ui', 'push.js'), 'utf8');
+  const SWIPE = fs.readFileSync(path.join(ROOT, 'web', 'ui', 'swipe.js'), 'utf8');
+  assert.match(PUSH, /'pointerdown',\s*\(e\) => \{[\s\S]{0,200}?if \(e\.isPrimary === false\) return;\s*start = null;/);
+  assert.match(SWIPE, /if \(e\.isPrimary === false\) return;/);
+  for (const fn of ['function onPeek(log)', 'function onSwipeReply(row, reply)']) {
+    assert.match(body(fn), /if \(e\.isPrimary === false\) return;/, fn);
+  }
+});
+
+test('peek and swipe-to-reply keep the gesture once they have it', () => {
+  // The sheet under them took the same gesture when the finger turned, and the log stayed
+  // peeked, or the message stayed pulled out, until the next full swipe.
+  for (const fn of ['function onPeek(log)', 'function onSwipeReply(row, reply)']) {
+    const b = body(fn);
+    assert.match(b, /e\.stopPropagation\(\)/, fn);
+    // Peek clears whatever a gesture the sheet took left behind; swipe-to-reply ends when the
+    // capture it took is lost.
+    assert.match(b, fn.includes('onPeek') ? /log\.classList\.remove\('peeking'\)/ : /lostpointercapture/, fn);
+  }
+});
+
+test('the phone keeps its own long-press off messages', () => {
+  // A later rule made message text selectable again on touch screens, so the phone's selection
+  // and callout came up together with the app's hold menu.
+  const coarse = [...CSS.matchAll(/@media \(pointer: coarse\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]).join('\n');
+  const selectable = coarse.slice(coarse.indexOf('-webkit-touch-callout: default') - 400, coarse.indexOf('-webkit-touch-callout: default'));
+  assert.doesNotMatch(selectable, /\.bubble,/);
+});

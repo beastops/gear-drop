@@ -126,5 +126,5 @@ test('and a passphrase change moves it with everything else', async () => {
   const fn = /async function resealVault\([\s\S]*?\n\}/.exec(main)?.[0];
   assert.ok(fn, 'resealVault is gone');
   assert.match(fn, /kv\.get\('prefs'\)/, 'the preferences are never read, so the sealed code cannot move');
-  assert.match(fn, /kv\.set\('prefs',/, 'the preferences are read and then not written back');
+  assert.match(fn, /key: 'prefs', value: movedPrefs/, 'the preferences are read and then not written back');
 });

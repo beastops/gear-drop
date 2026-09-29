@@ -82,7 +82,7 @@ test('the held files go only once the device really is verified', () => {
   // happen after the files were released or while they are still held, so the record must follow.
   assert.match(
     body('async function rememberPair(conn)'),
-    /if \(heldSend\?\.connId === oldId\) heldSend\.connId = id;/,
+    /for \(const w of heldSends\) if \(w\.connId === oldId\) w\.connId = id;/,
     'the held id is not re-keyed',
   );
 });
@@ -95,11 +95,10 @@ test('an answer about one device does not throw away files picked for another', 
    * ordinary.
    */
   const release = body('function releaseHeldSend(answered)');
-  assert.match(release, /if \(heldSend\.connId === answered\.id\)/, 'ownership is not checked first');
-  assert.ok(
-    release.indexOf('heldSend.connId === answered.id') < release.indexOf('heldSend = null'),
-    'the record is cleared before anyone checks whose it was',
-  );
+  // Whose each entry is, checked entry by entry; one for another device that still waits on its
+  // words is kept, not cleared with the rest.
+  assert.match(release, /if \(w\.connId === answered\.id\)/, 'ownership is not checked');
+  assert.match(release, /heldSends\.push\(w\)/, 'what another device is waiting for is thrown away');
 });
 
 test('and a question that could not be asked yet still gets asked', () => {
@@ -124,4 +123,42 @@ test('a picture or a recording sent from the conversation is held for the words 
   assert.ok(gate > 0 && gate < media.indexOf('conn.transfers.offer('), 'a chat picture goes to an unchecked device');
   // And once they are checked it goes, as a picture in the conversation, not as a file.
   assert.match(body('function releaseHeldSend(answered)'), /sendChatMedia\(/);
+});
+
+test('everything picked while the words were waiting goes once they are checked', () => {
+  /*
+   * One slot held what waited for the words. Two picks for a device still connecting each took
+   * it in turn, so only the last went out once the words were checked, and the earlier photos
+   * were dropped without a word said. Held as a list now, each for its own device.
+   */
+  const release = body('function releaseHeldSend(answered)');
+  const sent = [];
+  const asked = [];
+  const conns = new Map([
+    ['a', { id: 'a', verified: true }],
+    ['b', { id: 'b', verified: false }],
+  ]);
+  const heldSends = [
+    { connId: 'a', files: ['one.jpg'] },
+    { connId: 'a', files: ['two.jpg'] },
+    { connId: 'a', media: 'voice.webm', opts: {} },
+    { connId: 'b', files: ['for-b.pdf'] },
+    { connId: 'gone', files: ['nobody.txt'] },
+  ];
+  const run = new Function(
+    'state', 'app', 'sendFiles', 'sendChatMedia', 'sasConfirmed', 'promptVerify',
+    `let heldSends = state.held; function releaseHeldSend(answered) ${release}; releaseHeldSend(state.answered); state.held = heldSends;`,
+  );
+  const state = { held: heldSends, answered: conns.get('a') };
+  run(
+    state,
+    { conns },
+    (id, files) => sent.push(`${id}:${files.join()}`),
+    (id, media) => sent.push(`${id}:${media}`),
+    () => false,
+    (conn) => asked.push(conn.id),
+  );
+  assert.deepEqual(sent, ['a:one.jpg', 'a:two.jpg', 'a:voice.webm'], 'only the last pick went');
+  assert.deepEqual(asked, ['b'], 'the other device is asked about next');
+  assert.deepEqual(state.held.map((w) => w.connId), ['b'], 'what is for the other device keeps waiting');
 });
