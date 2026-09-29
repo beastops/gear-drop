@@ -1949,7 +1949,43 @@ function onNetworkLabel() {
     return;
   }
   paintDiscovery();
-  if (app.prefs.discovery === 'local' && !app.channels.local) enableLocal().catch(() => {});
+  if (app.prefs.discovery !== 'local') return;
+  /*
+   * Moved networks.
+   *
+   * The label arrives again every time the relay socket reconnects, and it only used to be read
+   * the first time. A phone that went from Wi-Fi to mobile data, or a laptop moved to another
+   * network, kept announcing itself on the network it had left - still visible there over the
+   * relay - and never joined the one it was on, so nothing nearby could see it until the app
+   * was reopened. A different label now means leaving the old network's channel and joining
+   * the new one, keeping any transfer that is still running.
+   */
+  const label = app.signal.networkLabel;
+  const ch = app.channels.local;
+  if (ch && label && ch.label !== `net:${label}`) {
+    moveNetwork().catch(() => {});
+    return;
+  }
+  if (!ch) enableLocal().catch(() => {});
+}
+
+let moving = null;
+function moveNetwork() {
+  // One move at a time: a socket that flaps can deliver two labels in quick succession.
+  moving ??= (async () => {
+    const ch = app.channels.local;
+    app.channels.local = null;
+    if (ch) await leaveChannel(ch, 'local', { keepBusy: true });
+    await enableLocal();
+  })().finally(() => {
+    moving = null;
+    // And if the label changed again while that was happening, follow it too.
+    const now = app.signal.networkLabel;
+    if (app.prefs.discovery === 'local' && now && app.channels.local && app.channels.local.label !== `net:${now}`) {
+      moveNetwork().catch(() => {});
+    }
+  });
+  return moving;
 }
 
 async function enableLocal() {
@@ -1975,11 +2011,12 @@ async function disableLocal({ quiet = false } = {}) {
   }
 }
 
-async function leaveChannel(ch, kind) {
+/** `keepBusy`: leave a conversation that is mid-transfer alone, as when moving networks. */
+async function leaveChannel(ch, kind, { keepBusy = false } = {}) {
   await ch.leave();
   for (const [key, entry] of [...app.chanPeers]) {
     if (entry.channel !== kind) continue;
-    dropChannelPeer(key, { keepBusy: false });
+    dropChannelPeer(key, { keepBusy });
   }
   for (const set of app.alsoOn.values()) set.delete(kind);
 }
