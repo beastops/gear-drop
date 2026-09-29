@@ -187,3 +187,18 @@ test('one bad frame closes one socket, never the relay', () => {
     );
   }
 });
+
+test('the Cloudflare relay answers a closing socket, and counts it gone once', () => {
+  /*
+   * A Worker must answer a close itself. Without the answer the browser's socket sat in
+   * "closing": the page could not reconnect, while the other device - already told this one
+   * had left - dropped the conversation. Reproduced against the Worker run locally: after one
+   * device closed its socket, neither side could send to the other again.
+   *
+   * And released once, whichever of 'close' and 'error' comes, or both: counted twice, the
+   * per-network cap came loose.
+   */
+  const worker = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'deploy', 'cloudflare', 'worker.js'), 'utf8');
+  assert.match(worker, /server\.addEventListener\('close', \(e\) => \{[\s\S]{0,900}?server\.close\(1000/);
+  assert.match(worker, /let released = false;/);
+});

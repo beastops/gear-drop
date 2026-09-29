@@ -144,14 +144,32 @@ export class RendezvousRoom {
       }
     });
 
+    // Exactly once, whichever way the socket ends - 'close', 'error', or both - as the Deno
+    // relay does. Counted twice, the per-network cap came loose.
+    let released = false;
     const gone = () => {
+      if (released) return;
+      released = true;
       this.rv.drop(conn);
       this.conns.delete(server);
       const held = (this.perNetwork.get(netKey) || 1) - 1;
       if (held > 0) this.perNetwork.set(netKey, held);
       else this.perNetwork.delete(netKey);
     };
-    server.addEventListener('close', gone);
+    server.addEventListener('close', (e) => {
+      gone();
+      /*
+       * And answer it. A Worker has to finish the closing handshake itself; without the answer
+       * the browser's socket sat in "closing", the page could not reconnect, and the other
+       * device - already told this one had left - never met it again until the browser gave
+       * up waiting. 1000 whatever arrived: 1005 and 1006 describe a close, they cannot be sent.
+       */
+      try {
+        server.close(1000, 'bye');
+      } catch {
+        /* already closed */
+      }
+    });
     server.addEventListener('error', gone);
 
     conn.send(
