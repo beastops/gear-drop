@@ -367,6 +367,13 @@ export function enableSwipeToDismiss(dialog) {
    * received message long enough to scroll is built when it is received, and a list of scrollers
    * taken at startup would leave it stuck.
    */
+  /*
+   * A page pushed in from the side - the conversation, full screen on a phone - goes back
+   * sideways, from its left edge, the way an iPhone page does. Pulling it down as well would be
+   * two ways out that disagree about which way is back, so it only ever scrolls.
+   */
+  const pushed = () => !!dialog.hasAttribute?.('data-push') && matchMedia('(max-width: 560px)').matches;
+
   const scrollerUnder = (target) => {
     for (let el = target; el && el !== dialog; el = el.parentElement) {
       if (claim(el) && el.scrollHeight > el.clientHeight + 1) return el;
@@ -532,7 +539,7 @@ export function enableSwipeToDismiss(dialog) {
       document.body.style.setProperty('user-select', 'none');
       // Pulling down with nothing above to scroll into view is the sheet. Everything else is
       // the list. That is the whole rule, and it is the one every sheet on a phone uses.
-      if (dy > 0 && scrollFrom <= 0) takeSheet(e);
+      if (dy > 0 && scrollFrom <= 0 && !pushed()) takeSheet(e);
       else mode = 'scroll';
     }
 
@@ -548,7 +555,7 @@ export function enableSwipeToDismiss(dialog) {
       if (want < 0) {
         scrollTo = 0;
         if (scroller) scroller.scrollTop = 0;
-        takeSheet(e);
+        if (!pushed()) takeSheet(e);
       } else {
         scrollTo = Math.min(maxScroll, want);
       }

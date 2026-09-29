@@ -5394,3 +5394,102 @@ dialog.confirm::backdrop { background: transparent; }
   #chat-dialog .chat-composer:not(.has-text) #btn-chat-send { display: none; }
   #chat-dialog .chat-composer.has-text #btn-chat-mic { display: none; }
 }
+
+/* ───────────────────────────── the app on a phone, the iPhone way ───────────────────────────── */
+
+/* iPhone */
+/*
+ * The main screen, and how the screens move, on a phone.
+ *
+ * A large title under the toolbar, as an iOS app's first screen has. Devices spring in with a
+ * little overshoot and give under a finger. A sheet coming up pushes the screen back into a dark
+ * rounded card behind it; the conversation is a page pushed in from the right, with the screen
+ * behind sliding a quarter of the way left, and a drag from its left edge takes it back with the
+ * screen following the finger. The black the card sits on is the page's own background, set here
+ * so it is there to show.
+ *
+ * All of it is transforms on layers that are already composited - the page and the dialogs - so
+ * none of it repaints anything, and the radar is paused while any of it is on screen.
+ */
+@media (max-width: 560px) {
+  :root { --ios-ease: cubic-bezier(0.32, 0.72, 0, 1); }
+  html { background: #000; }
+
+  /* The screen behind. */
+  body {
+    transform-origin: 50% 0;
+    transition:
+      scale 520ms var(--ios-ease),
+      translate 520ms var(--ios-ease),
+      border-radius 520ms var(--ios-ease);
+  }
+  body.card-behind {
+    scale: 0.92;
+    translate: 0 calc(env(safe-area-inset-top) + 10px);
+    border-radius: 14px;
+  }
+  body.pushed { translate: calc((var(--push, 0) - 1) * 28%) 0; }
+  /* A finger on the edge is the animation: nothing eases behind it. */
+  body.push-dragging { transition: none; }
+
+  /* The conversation comes in from the right and goes back the same way, never fading. */
+  #chat-dialog {
+    opacity: 1;
+    translate: 100% 0;
+    scale: 1;
+    transition:
+      translate 500ms var(--ios-ease),
+      overlay 500ms allow-discrete,
+      display 500ms allow-discrete;
+  }
+  #chat-dialog[open] { translate: none; }
+  @starting-style {
+    #chat-dialog[open] { translate: 100% 0; }
+  }
+  /* The edge of the page as it slides, the soft shadow an iPhone page casts on the one under it. */
+  #chat-dialog .chat-sheet { box-shadow: -10px 0 28px rgb(0 0 0 / 0.35); }
+  #chat-dialog::backdrop { background: rgb(0 0 0 / calc(0.3 * (1 - var(--push, 0)))); }
+
+  /* A large title under the toolbar. */
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 0;
+    padding-bottom: 0;
+  }
+  .topbar .actions { order: 1; margin-left: auto; }
+  .topbar .brand {
+    order: 2;
+    flex-basis: 100%;
+    padding: 0 8px 4px;
+  }
+  .brand-mark { display: none; }
+  .brand-name {
+    display: block;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+  }
+  /* A toolbar button dims under a finger and comes back, as an iOS bar button does. */
+  .topbar .icon-btn:active { opacity: 0.45; transform: scale(0.94); }
+  .topbar .icon-btn { transition: opacity 180ms ease, transform var(--spring-snap); }
+
+  /* Devices spring in, and give under a finger. */
+  .peer {
+    animation: peer-in 560ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  .peer:active { transform: none; }
+  .peer .avatar { transition: scale 380ms cubic-bezier(0.34, 1.56, 0.64, 1), background-color var(--t), color var(--t); }
+  .peer:active .avatar { scale: 0.9; transition-duration: 120ms; }
+  .pname { font-size: 13px; font-weight: 600; }
+  .pmeta { font-size: 11.5px; }
+
+  .hint { font-size: 13px; letter-spacing: -0.01em; }
+}
+@media (max-width: 560px) and (prefers-reduced-motion: reduce) {
+  body,
+  #chat-dialog { transition: none; }
+  body.card-behind { scale: 1; translate: none; border-radius: 0; }
+  .peer { animation: none; }
+}

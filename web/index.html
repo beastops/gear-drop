@@ -52,6 +52,7 @@
 <link rel="modulepreload" href="ui/back.js">
 <link rel="modulepreload" href="ui/viewer.js">
 <link rel="modulepreload" href="ui/when.js">
+<link rel="modulepreload" href="ui/push.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/curve.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/edwards.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/hash-to-curve.js">
@@ -726,7 +727,7 @@
   </div>
 </dialog>
 
-<dialog id="chat-dialog" class="sheet" aria-labelledby="chat-title">
+<dialog id="chat-dialog" class="sheet" data-push aria-labelledby="chat-title">
   <div class="sheet-body rail-accent chat-sheet">
     <!--
       The two controls that act on the whole conversation sit together, above it.

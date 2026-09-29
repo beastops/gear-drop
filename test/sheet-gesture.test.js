@@ -226,6 +226,23 @@ test('pulling down from the top of the list dismisses the sheet', async () => {
   s.restore();
 });
 
+test('a page pushed in from the side does not pull down like a sheet', async () => {
+  // The conversation on a phone is a full-screen page that goes back sideways, from its edge.
+  // Pulling it down as well is two ways out that disagree about which way is back.
+  const s = await sheet();
+  s.dialog.hasAttribute = (name) => name === 'data-push';
+  s.down(100);
+  s.move(140);
+  s.move(220);
+  s.move(280);
+  assert.equal(s.pulled(), 0, 'the page followed the finger down');
+  s.up(280);
+  s.flush(300);
+  await new Promise((r) => setTimeout(r, 450));
+  assert.equal(s.dialog.closed, 0, 'the page closed on a pull down');
+  s.restore();
+});
+
 test('pulling down part-way through the list scrolls it and leaves the sheet alone', async () => {
   const s = await sheet({ scrollTop: 400 });
   s.down(100);

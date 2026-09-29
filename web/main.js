@@ -59,6 +59,7 @@ import { enableSwipeToDismiss, enableSwipeUpToDismiss } from './ui/swipe.js';
 import { createBackStack } from './ui/back.js';
 import { openViewer } from './ui/viewer.js';
 import { layoutOf, stampOf, initialsOf } from './ui/when.js';
+import { enableEdgeBack, EDGE_PX } from './ui/push.js';
 import { captureDust } from './core/dust.js';
 
 const te = new TextEncoder();
@@ -4880,6 +4881,8 @@ function onSwipeReply(row, reply) {
   row.addEventListener('pointerdown', (e) => {
     swallow = false;
     if (e.pointerType === 'mouse' || e.target.closest?.('button:not(.bubble-quote), a, input, .audio-track')) return;
+    // The left edge of a phone's full-screen conversation is the way back, not a reply.
+    if (e.clientX <= EDGE_PX && matchMedia('(max-width: 560px)').matches) return;
     start = { x: e.clientX, y: e.clientY, id: e.pointerId };
     active = false;
     armed = false;
@@ -6825,6 +6828,11 @@ function bindUi() {
   ui.chatInput.addEventListener('input', noteTyping);
   ui.chatInput.addEventListener('input', () => ui.chatComposer.classList.toggle('has-text', !!ui.chatInput.value.trim()));
   onPeek(ui.chatLog);
+  enableEdgeBack(ui.chatDialog, {
+    isPushed: () => matchMedia('(max-width: 560px)').matches,
+    onProgress: (p) => document.body.style.setProperty('--push', p.toFixed(3)),
+    onDragging: (on) => document.body.classList.toggle('push-dragging', on),
+  });
   ui.chatDialog.addEventListener('close', () => stopTyping());
   ui.chatReplyCancel.addEventListener('click', () => {
     cancelReply();
@@ -7165,6 +7173,15 @@ function watchModals() {
   // conditions go through one function so closing a dialog in a hidden tab cannot wake the
   // radar back up.
   const sync = () => {
+    /*
+     * On a phone the screen behind moves with what is in front: pushed aside by the full-screen
+     * conversation, or pushed back into a dark card behind a sheet, the way iOS does both. The
+     * classes say which; the stylesheet only acts on them at a phone's width.
+     */
+    const chatOpen = ui.chatDialog.open;
+    document.body.classList.toggle('pushed', chatOpen);
+    if (!chatOpen) document.body.style.removeProperty('--push');
+    document.body.classList.toggle('card-behind', !chatOpen && dialogs.some((d) => d.open && d.classList.contains('sheet')));
     if (document.hidden || anyOpen()) {
       app.radar?.pause();
     } else {
