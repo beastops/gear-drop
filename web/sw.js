@@ -6,7 +6,7 @@
  * operating system hands one over through the share sheet, and even then it only carries
  * it across to the page. It is never uploaded, cached, or written anywhere.
  */
-const VERSION = 'gd-v2.83.0';
+const VERSION = 'gd-v2.84.0';
 const SHELL = [
   './',
   'index.html',
@@ -40,6 +40,7 @@ const SHELL = [
   'ui/swipe.js',
   'ui/back.js',
   'ui/viewer.js',
+  'ui/when.js',
   'core/chat.js',
 
   /*

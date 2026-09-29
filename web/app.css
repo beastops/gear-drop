@@ -5074,3 +5074,323 @@ dialog.confirm::backdrop { background: transparent; }
 @media (prefers-reduced-motion: reduce) {
   .confirm-card { animation: none; }
 }
+
+/* ───────────────────────────── the conversation on a phone ───────────────────────────── */
+
+/* The pieces only a phone's conversation shows. Everywhere else they are not there. */
+.chat-back,
+.chat-avatar,
+.chat-stamp,
+.chat-status,
+.bubble-when {
+  display: none;
+}
+
+/* iMessage */
+/*
+ * On a phone the conversation is laid out the way Messages lays one out.
+ *
+ * Full screen on a flat ground, with a back chevron, the other device's monogram and name at
+ * the top and the security line under the name. Blue for what you sent and grey for what you
+ * received; a run from one side stacks tight, and only its last bubble has a tail - two pieces
+ * drawn at its corner, the second in the ground colour to cut the curve, which is why the
+ * ground has to be flat. A time line sits centred where the conversation picks up after a quiet
+ * hour, the newest message you sent says whether it has gone, and a swipe to the left slides
+ * your messages aside to show when each was sent. The text box is a rounded field with the
+ * send arrow inside it, and the microphone in the same place while it is empty.
+ *
+ * Scoped to the conversation, so no other sheet changes, and to a phone's width, so a computer
+ * keeps the sheet it had.
+ */
+@media (max-width: 560px) {
+  #chat-dialog {
+    --imsg-bg: #000;
+    --imsg-in: #262629;
+    --imsg-in-text: #fff;
+    --imsg-out: #0a84ff;
+    --imsg-meta: rgba(235, 235, 245, 0.6);
+    --imsg-line: rgba(84, 84, 88, 0.55);
+    width: 100vw;
+    min-width: 0;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+  }
+  body.theme-light #chat-dialog {
+    --imsg-bg: #fff;
+    --imsg-in: #e9e9eb;
+    --imsg-in-text: #000;
+    --imsg-out: #007aff;
+    --imsg-meta: rgba(60, 60, 67, 0.6);
+    --imsg-line: rgba(60, 60, 67, 0.22);
+  }
+  #chat-dialog .chat-sheet {
+    height: 100dvh;
+    max-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    border-radius: 0;
+    background: var(--imsg-bg);
+    box-shadow: none;
+    overflow: hidden;
+  }
+  /* A full screen has no handle to pull. */
+  #chat-dialog .chat-sheet::before { display: none; }
+
+  /* The top: back, monogram and name, the security line under them. */
+  #chat-dialog .chat-back {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    z-index: 2;
+    top: calc(env(safe-area-inset-top) + 6px);
+    left: 2px;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    color: var(--imsg-out);
+    cursor: pointer;
+  }
+  #chat-dialog .chat-back svg { width: 27px; height: 27px; }
+  #chat-dialog .chat-back:active { opacity: 0.5; }
+  #chat-dialog .chat-head-tools { top: calc(env(safe-area-inset-top) + 12px); right: 12px; }
+  #chat-dialog .chat-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    margin: 0;
+    padding: calc(env(safe-area-inset-top) + 10px) 64px 0;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+  #chat-dialog #chat-title,
+  #chat-dialog .chat-with { display: none; }
+  #chat-dialog .chat-avatar {
+    display: grid;
+    place-items: center;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #a5abb8, #858994);
+    color: #fff;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  #chat-dialog .chat-head .h2-sub {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  #chat-dialog .chat-secure {
+    justify-content: center;
+    margin: 0;
+    padding: 3px 16px 9px;
+    font-size: 11px;
+    border-bottom: 0.5px solid var(--imsg-line);
+  }
+
+  /* The conversation itself, filling what is left. */
+  #chat-dialog .chat-log {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    gap: 0;
+    padding: 6px 14px 8px;
+    overflow-x: hidden;
+  }
+  #chat-dialog .chat-note { padding: 4px 18px; text-align: center; font-size: 12px; }
+  #chat-dialog .bubble-time { display: none; }
+  #chat-dialog .chat-stamp {
+    display: block;
+    margin: 14px 0 6px;
+    text-align: center;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--imsg-meta);
+  }
+  #chat-dialog .chat-status {
+    display: block;
+    align-self: flex-end;
+    margin: 3px 2px 0 0;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--imsg-meta);
+  }
+
+  /* Bubbles: blue and grey, tight within a run, with a tail on its last. */
+  #chat-dialog .bubble {
+    max-width: 75%;
+    margin-top: 2px;
+    padding: 7px 13px 8px;
+    border-radius: 18px;
+    font-size: 16.5px;
+    line-height: 1.3;
+  }
+  #chat-dialog .bubble.first { margin-top: 9px; }
+  #chat-dialog .chat-stamp + .bubble { margin-top: 2px; }
+  #chat-dialog .bubble.out {
+    background: var(--imsg-out);
+    color: #fff;
+    border-bottom-right-radius: 18px;
+  }
+  #chat-dialog .bubble.in {
+    background: var(--imsg-in);
+    color: var(--imsg-in-text);
+    border-bottom-left-radius: 18px;
+  }
+  #chat-dialog .bubble.tail::before,
+  #chat-dialog .bubble.tail::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    height: 20px;
+    pointer-events: none;
+  }
+  #chat-dialog .bubble.out.tail::before {
+    right: -7px;
+    width: 20px;
+    background: var(--imsg-out);
+    border-bottom-left-radius: 16px 14px;
+  }
+  #chat-dialog .bubble.out.tail::after {
+    right: -10px;
+    width: 10px;
+    background: var(--imsg-bg);
+    border-bottom-left-radius: 10px;
+  }
+  #chat-dialog .bubble.in.tail::before {
+    left: -7px;
+    width: 20px;
+    background: var(--imsg-in);
+    border-bottom-right-radius: 16px 14px;
+  }
+  #chat-dialog .bubble.in.tail::after {
+    left: -10px;
+    width: 10px;
+    background: var(--imsg-bg);
+    border-bottom-right-radius: 10px;
+  }
+  /* A photo is the message, edge to edge, and has no tail. */
+  #chat-dialog .bubble.photo.tail::before,
+  #chat-dialog .bubble.photo.tail::after { content: none; }
+  #chat-dialog .bubble .bubble-quote { background: rgb(0 0 0 / 0.16); }
+  #chat-dialog .bubble.in .bubble-quote { background: rgb(128 128 128 / 0.16); }
+
+  /* Reactions on the top corner, the way tapbacks sit. */
+  #chat-dialog .bubble.has-rx { margin-top: 18px; margin-bottom: 0; }
+  #chat-dialog .bubble-rx {
+    top: -17px;
+    bottom: auto;
+    min-height: 26px;
+    border-color: var(--imsg-bg);
+    background: var(--imsg-in);
+    border-radius: 14px;
+  }
+  #chat-dialog .bubble.out .bubble-rx { left: -12px; right: auto; }
+  #chat-dialog .bubble.in .bubble-rx { right: -12px; left: auto; }
+  #chat-dialog .bubble-rx.mine { background: var(--imsg-out); box-shadow: none; }
+
+  /* Each message's time, shown as the conversation is swiped to the left. */
+  #chat-dialog .bubble-when {
+    display: block;
+    position: absolute;
+    top: 50%;
+    left: calc(100% + 10px);
+    translate: 0 -50%;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--imsg-meta);
+    white-space: nowrap;
+    opacity: var(--peek-p, 0);
+    pointer-events: none;
+  }
+  #chat-dialog .chat-log:not(.peeking) .bubble-when { transition: opacity var(--t) var(--ease); }
+  #chat-dialog .chat-log.peeking .bubble.out {
+    translate: var(--peek, 0px) 0;
+    transition: none;
+  }
+
+  /* Someone typing: a grey bubble of dots, with the two small circles under it. */
+  #chat-dialog .chat-typing {
+    position: relative;
+    margin: 9px 0 4px 4px;
+    padding: 10px 13px;
+    border-radius: 18px;
+    background: var(--imsg-in);
+  }
+  #chat-dialog .chat-typing::before,
+  #chat-dialog .chat-typing::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    background: var(--imsg-in);
+  }
+  #chat-dialog .chat-typing::before { left: -2px; bottom: -2px; width: 11px; height: 11px; }
+  #chat-dialog .chat-typing::after { left: -7px; bottom: -8px; width: 5px; height: 5px; }
+
+  /* The text box: a rounded field with the send arrow, or the microphone, inside it. */
+  #chat-dialog .chat-reply { margin: 0 10px 6px; }
+  #chat-dialog .chat-composer {
+    position: relative;
+    align-items: flex-end;
+    gap: 8px;
+    margin: 0;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    border-top: 0.5px solid var(--imsg-line);
+    background: var(--imsg-bg);
+  }
+  #chat-dialog #btn-chat-attach {
+    width: 34px;
+    height: 34px;
+    margin-bottom: 1px;
+    background: var(--fill);
+    color: var(--muted);
+  }
+  #chat-dialog #btn-chat-attach svg { width: 18px; height: 18px; }
+  #chat-dialog .chat-input {
+    min-height: 36px;
+    padding: 7px 42px 7px 14px;
+    border: 1px solid var(--imsg-line);
+    border-radius: 19px;
+    background: transparent;
+    font-size: 16.5px;
+    line-height: 1.3;
+  }
+  #chat-dialog #btn-chat-send {
+    position: absolute;
+    right: 14px;
+    bottom: calc(11px + env(safe-area-inset-bottom));
+    width: 30px;
+    min-width: 0;
+    height: 30px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--imsg-out);
+    color: #fff;
+    box-shadow: none;
+  }
+  #chat-dialog #btn-chat-send svg { width: 17px; height: 17px; rotate: -90deg; }
+  #chat-dialog #btn-chat-mic {
+    position: absolute;
+    right: 14px;
+    bottom: calc(11px + env(safe-area-inset-bottom));
+    width: 30px;
+    height: 30px;
+    background: transparent;
+    color: var(--imsg-meta);
+  }
+  #chat-dialog .chat-composer:not(.has-text) #btn-chat-send { display: none; }
+  #chat-dialog .chat-composer.has-text #btn-chat-mic { display: none; }
+}

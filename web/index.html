@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Gear Drop</title>
 <meta name="description" content="Device-to-device file transfer. Nothing in the middle can read your files, impersonate a device, or link your devices across sessions.">
 <meta name="theme-color" content="#000000">
@@ -51,6 +51,7 @@
 <link rel="modulepreload" href="ui/swipe.js">
 <link rel="modulepreload" href="ui/back.js">
 <link rel="modulepreload" href="ui/viewer.js">
+<link rel="modulepreload" href="ui/when.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/curve.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/edwards.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/hash-to-curve.js">
@@ -735,6 +736,10 @@
       irreversible. It is a quiet icon up here instead, beside Close, which is where a thing
       that acts on the whole sheet belongs.
     -->
+    <!-- On a phone the conversation is a full screen with a way back, as in Messages. -->
+    <button class="chat-back" type="button" data-close data-i18n-label="chat.back" aria-label="Back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
     <div class="chat-head-tools">
       <button id="btn-chat-clear" class="close-x" type="button" data-i18n-title="chat.clear" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"/></svg>
@@ -744,8 +749,8 @@
       </button>
     </div>
 
-    <h2><span id="chat-title" data-i18n="chat.title">Chat</span>
-      <span class="h2-sub"><span data-i18n="chat.with">With</span> <span id="chat-who" class="strong"></span>
+    <h2 class="chat-head"><span class="chat-avatar" id="chat-avatar" aria-hidden="true"></span><span id="chat-title" data-i18n="chat.title">Chat</span>
+      <span class="h2-sub"><span class="chat-with" data-i18n="chat.with">With</span> <span id="chat-who" class="strong"></span>
         <span id="chat-typing-label" class="chat-typing-label" data-i18n="chat.typing" hidden>typing…</span></span>
     </h2>
 
@@ -967,6 +972,7 @@
   <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="m9 6 6 6-6 6"/>
 </symbol>
+<symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5.5 8.5 12l6.5 6.5"/></symbol>
 <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.6 9.8 17.4 19 8.2"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
   <path d="M12 5v14M5 12h14"/>

@@ -58,6 +58,7 @@ import { LOCALES, currentLocale, loadLocales, preferredLocale, setLocale, setTex
 import { enableSwipeToDismiss, enableSwipeUpToDismiss } from './ui/swipe.js';
 import { createBackStack } from './ui/back.js';
 import { openViewer } from './ui/viewer.js';
+import { layoutOf, stampOf, initialsOf } from './ui/when.js';
 import { captureDust } from './core/dust.js';
 
 const te = new TextEncoder();
@@ -188,6 +189,7 @@ const ui = {
   chatClear: $('btn-chat-clear'),
   chatAttach: $('btn-chat-attach'),
   chatReply: $('chat-reply'),
+  chatAvatar: $('chat-avatar'),
   confirm: $('confirm-dialog'),
   confirmTitle: $('confirm-title'),
   confirmBody: $('confirm-body'),
@@ -4088,9 +4090,24 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
   // Say so when this one will not be kept, rather than letting someone assume it will.
   ui.chatEphemeral.hidden = !ephemeral;
 
+  // Where each message sits in time: its run, and whether a time line goes above it. A phone
+  // draws these the way Messages does (see `ui/when.js`); a computer keeps its own times.
+  const shape = layoutOf(messages);
+  const words = { locale: currentLocale(), today: t('chat.today'), yesterday: t('chat.yesterday') };
+
   messages.forEach((m, i) => {
+    if (shape[i].stamp) {
+      const stamp = document.createElement('div');
+      stamp.className = 'chat-stamp';
+      stamp.dataset.id = `s:${m.id}`;
+      stamp.textContent = stampOf(m.at, words);
+      ui.chatLog.append(stamp);
+    }
     const row = document.createElement('div');
     row.className = `bubble ${m.dir}`;
+    if (shape[i].first) row.classList.add('first');
+    // The last of a run carries the tail.
+    if (shape[i].last) row.classList.add('tail');
     // What a delete, and the animation after one, find the bubble by.
     row.dataset.id = m.id;
     if (shown.has(m.id)) row.classList.add('settled');
@@ -4152,6 +4169,12 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
       row.classList.add('has-rx');
       row.append(reactionBadge(m));
     }
+    // Its exact time, shown when the conversation is swiped to the left.
+    const when = document.createElement('span');
+    when.className = 'bubble-when';
+    when.setAttribute('aria-hidden', 'true');
+    when.textContent = clockOf(m.at);
+    row.append(when);
     ui.chatLog.append(row);
 
     // One timestamp per run, under the last of it.
@@ -4164,6 +4187,20 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
       ui.chatLog.append(time);
     }
   });
+
+  // Under the newest message, when it is one of yours: whether it has gone. "Sent", not
+  // "Delivered": this side knows the message left, and nothing comes back to say it arrived.
+  const newest = messages.at(-1);
+  if (newest?.dir === 'out') {
+    const status = document.createElement('div');
+    status.className = 'chat-status';
+    status.dataset.id = `st:${newest.id}`;
+    status.textContent = newest.pending ? t('chat.waitingToSend') : t('chat.sent');
+    ui.chatLog.append(status);
+  }
+
+  // The typing dots follow the newest message, inside the conversation, as they do in Messages.
+  ui.chatLog.append(ui.chatTyping);
 
   // The rows are in the document now, so their tracks have a width to be fitted to.
   fitWaveforms();
@@ -4598,6 +4635,16 @@ function heartBurst(row, emoji) {
  * selected along the way is let go. The time it happened is left on the row, so a photo that
  * was about to open on the first tap knows not to.
  */
+/**
+ * When a finger last touched a message, across every message.
+ *
+ * Chrome follows a finger's double tap with a mouse-style double-click. The tap has already
+ * reacted by then, and redrawn the message; the double-click lands on the new one, which knew
+ * nothing of the tap, and took the heart straight back off. Shared, because the row that
+ * would remember is gone by the time the double-click arrives.
+ */
+let touchedAt = 0;
+
 function onDoubleTap(row, fire) {
   let down = null;
   let last = null;
@@ -4610,6 +4657,7 @@ function onDoubleTap(row, fire) {
     fire();
   };
   row.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') touchedAt = performance.now();
     down = e.pointerType === 'mouse' || skip(e) ? null : { x: e.clientX, y: e.clientY, t: performance.now() };
   });
   row.addEventListener('pointerup', (e) => {
@@ -4629,7 +4677,8 @@ function onDoubleTap(row, fire) {
     last = { t: now, x: e.clientX, y: e.clientY };
   });
   row.addEventListener('dblclick', (e) => {
-    if (skip(e) || performance.now() - firedAt < 500) return; // a finger's, already handled
+    // A finger's double tap, already handled, arriving again as a double-click.
+    if (skip(e) || performance.now() - firedAt < 500 || performance.now() - touchedAt < 800) return;
     getSelection()?.removeAllRanges();
     go();
   });
@@ -4675,8 +4724,11 @@ function stopTyping({ quiet = false } = {}) {
 function paintTyping(conn) {
   const on = conn.typing > Date.now();
   if (ui.chatDialog.open && chatPeerId === conn.id) {
+    const atBottom = ui.chatLog.scrollHeight - ui.chatLog.scrollTop - ui.chatLog.clientHeight < 60;
     ui.chatTyping.hidden = !on;
     ui.chatTypingLabel.hidden = !on;
+    // Brought into view if the conversation was already at its newest, as a message would be.
+    if (on && atBottom) ui.chatLog.scrollTop = ui.chatLog.scrollHeight;
   }
   const tile = tileFor(conn.id);
   if (tile && !conn.progress) paintTile(tile, conn);
@@ -4750,6 +4802,62 @@ function jumpTo(id) {
   void target.offsetWidth; // restart the animation if it is already running
   target.classList.add('flash');
   setTimeout(() => target.classList.remove('flash'), 1300);
+}
+
+/**
+ * Swipe the conversation to the left to see when each message was sent, as in Messages.
+ *
+ * Your own messages slide aside and each one's time appears in the space they leave; the times
+ * of the ones you received line up at the same edge. Let go and everything springs back. Only a
+ * finger's sideways drag to the left: a drag to the right is a reply, and anything more
+ * vertical is the conversation scrolling.
+ */
+const PEEK_PX = 64;
+
+function onPeek(log) {
+  let start = null;
+  let active = false;
+  log.addEventListener('pointerdown', (e) => {
+    start = null;
+    if (e.pointerType === 'mouse' || e.target.closest?.('button:not(.bubble-quote), a, input, .audio-track')) return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    active = false;
+  });
+  log.addEventListener('pointermove', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const mx = e.clientX - start.x;
+    const my = e.clientY - start.y;
+    if (!active) {
+      if (Math.hypot(mx, my) < 10) return;
+      if (!(mx < 0 && Math.abs(mx) > Math.abs(my) * 1.3)) {
+        start = null;
+        return;
+      }
+      active = true;
+      // The received messages' times go against the right edge, where the sent ones' appear.
+      const edge = log.getBoundingClientRect().right - PEEK_PX + 6;
+      for (const b of log.querySelectorAll('.bubble.in')) {
+        const when = b.querySelector('.bubble-when');
+        if (when) when.style.left = `${Math.round(edge - b.getBoundingClientRect().left)}px`;
+      }
+      log.classList.add('peeking');
+    }
+    const pull = Math.min(PEEK_PX, -mx);
+    log.style.setProperty('--peek', `${(-Math.max(0, pull)).toFixed(1)}px`);
+    log.style.setProperty('--peek-p', (Math.max(0, pull) / PEEK_PX).toFixed(3));
+    if (e.cancelable) e.preventDefault();
+  });
+  const end = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    start = null;
+    if (!active) return;
+    active = false;
+    log.classList.remove('peeking');
+    log.style.removeProperty('--peek');
+    log.style.removeProperty('--peek-p');
+  };
+  log.addEventListener('pointerup', end);
+  log.addEventListener('pointercancel', end);
 }
 
 /**
@@ -5694,6 +5802,8 @@ function paintChatSecure() {
 }
 
 function paintChatState() {
+  // The send arrow shows while there is something to send; the microphone while there is not.
+  ui.chatComposer.classList.toggle('has-text', !!ui.chatInput.value.trim());
   const online = !!app.conns.get(chatPeerId);
   paintChatSecure();
 
@@ -5741,6 +5851,7 @@ async function openChat(peerId) {
   chatPeerId = peerId;
   cancelReply();
   ui.chatWho.textContent = entry.name;
+  ui.chatAvatar.textContent = initialsOf(entry.name);
   ui.chatInput.value = '';
   ui.chatInput.style.height = '';
 
@@ -6712,6 +6823,8 @@ function bindUi() {
     });
   }
   ui.chatInput.addEventListener('input', noteTyping);
+  ui.chatInput.addEventListener('input', () => ui.chatComposer.classList.toggle('has-text', !!ui.chatInput.value.trim()));
+  onPeek(ui.chatLog);
   ui.chatDialog.addEventListener('close', () => stopTyping());
   ui.chatReplyCancel.addEventListener('click', () => {
     cancelReply();

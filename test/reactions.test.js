@@ -131,6 +131,23 @@ test('a double tap hearts a message, or takes the heart back', () => {
   assert.match(figure, /doubleTapped/);
 });
 
+test('a finger\'s double tap is not counted twice', () => {
+  /*
+   * Found on the phone layout: Chrome follows a finger's double tap with a mouse-style
+   * double-click. The tap had already added the heart and redrawn the message, and the
+   * double-click landed on the new message and took the heart straight back off, so a double
+   * tap appeared to do nothing.
+   */
+  const tap = body('function onDoubleTap(row, fire)');
+  assert.match(tap, /if \(e\.pointerType !== 'mouse'\) touchedAt = performance\.now\(\);/);
+  assert.match(tap, /performance\.now\(\) - touchedAt < 800/);
+});
+
+test('the typing dots follow the newest message, inside the conversation', () => {
+  const draw = body('function renderChat(messages, { locked = false, ephemeral = false, keepScroll = false } = {})');
+  assert.match(draw, /ui\.chatLog\.append\(ui\.chatTyping\)/);
+});
+
 test('the menus offer the six, and a reaction reaches the other device or waits for it', () => {
   assert.match(body('function openFocusMenu(m, row, actions)'), /reactionBar\(/);
   assert.match(body('function openBubbleMenu(m, row)'), /reactionBar\(/);
