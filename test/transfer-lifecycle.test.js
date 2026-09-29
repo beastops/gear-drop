@@ -233,3 +233,46 @@ test('the page asks to continue after moving from the relay back to direct, and 
   // A failure is said as one, not as somebody having cancelled.
   assert.match(MAIN, /e\.detail\?\.reason === 'failed' \|\| e\.detail\?\.reason === 'gone'/);
 });
+
+test('a link that drops as the last of a file is confirmed leaves it to resume', async () => {
+  /*
+   * The send loop ends by telling the other side each file is done. A link lost at that moment
+   * throws there, and a throw from the loop was taken as the file failing: the job was deleted
+   * and cancelled on both sides, where before it waited to be resumed.
+   */
+  const { A, B, ta, ev } = pair();
+  const t1 = await A.offer([file(256 * 1024, 'one.bin')]);
+  const job = await (async () => {
+    for (let i = 0; i < 200 && !A.out.get(t1)?.pumping; i++) await sleep(5);
+    return A.out.get(t1);
+  })();
+  assert.ok(job, 'never started sending');
+  // The control path goes just as the loop is about to say "done".
+  const send = A._sendCtl.bind(A);
+  A._sendCtl = async (msg, ...rest) => {
+    if (msg.t === 'done') throw new Error('control path is not open');
+    return send(msg, ...rest);
+  };
+  await until(() => !job.pumping, 3000);
+  await sleep(50);
+  assert.ok(A.out.has(t1), 'the job was thrown away');
+  assert.notEqual(job.state, 'aborted');
+  assert.ok(!ev.some((e) => e.startsWith(`B:aborted ${t1}`)), 'the other side was told it was cancelled');
+  void B;
+  void ta;
+});
+
+test('chunks that keep failing to open are said to, and do not wait for the end', async () => {
+  // Dropping a chunk that does not open is right for the few left over from a cancelled
+  // transfer. A stream of them is a key mismatch, and saying nothing until the whole file had
+  // gone plus thirty seconds was the other extreme.
+  const { A, B, ta, ev } = pair();
+  ta.send = ((orig) => (lane, bytes) => {
+    const copy = new Uint8Array(bytes);
+    copy[copy.length - 1] ^= 1; // every tag broken
+    return orig(lane, copy);
+  })(ta.send.bind(ta));
+  await A.offer([file(8 * 1024 * 1024, 'big.bin')]);
+  assert.ok(await until(() => ev.some((e) => e.startsWith('B:error')), 5000), 'nothing said while every chunk failed');
+  void B;
+});

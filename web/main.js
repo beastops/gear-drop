@@ -331,7 +331,7 @@ const back = createBackStack();
  * The build this page is. Shipped inside the page, so it is the copy actually running rather
  * than whatever the server has most recently; kept equal to the worker's VERSION by a test.
  */
-const BUILD = 'gd-v2.89.0';
+const BUILD = 'gd-v2.90.0';
 
 /** The resting tab icon, remembered before the progress ring ever replaces it. */
 let baseFavicon = null;
@@ -488,7 +488,32 @@ async function boot() {
   bootStep('render', () => render());
 }
 
+/**
+ * Whether reloading this page now would lose something that lives only in it.
+ *
+ * Asked before this tab gives the device to a newer one and before it reloads itself for a new
+ * version: bytes moving, files picked, words typed, a recording, a code waiting to be typed on
+ * the other device, safety words on screen, any sheet open, or a conversation with a device
+ * that is not paired - which lasts exactly as long as the tab does.
+ */
+function pageHolds() {
+  return (
+    transferInFlight() ||
+    !!app.staged ||
+    !!ui.chatInput?.value ||
+    !!recorder ||
+    !!app.hostCode ||
+    !!verifying ||
+    modalStack.length > 0 ||
+    [...app.conns.values()].some((c) => !c.peer)
+  );
+}
+
 const ASLEEP_KEY = 'gd-asleep';
+/** Whether this tab is the one running - the only one that reloads itself for a new version. */
+let tabLive = false;
+/** Taken over by another tab: going, and no "leave site?" prompt may hold it open. */
+let tabTaken = false;
 
 function untilThisTabIsLive() {
   let asleep = false;
@@ -497,23 +522,36 @@ function untilThisTabIsLive() {
     asleep = sessionStorage.getItem(ASLEEP_KEY) === '1';
     sessionStorage.removeItem(ASLEEP_KEY);
   } catch {
-    /* no session storage: start as any new tab would */
+    /* no session storage: the address carries it instead, below */
+  }
+  // Where session storage cannot be written, the note that this tab lost travels in the address.
+  const here = new URL(location.href);
+  if (here.searchParams.has('asleep')) {
+    asleep = true;
+    here.searchParams.delete('asleep');
+    history.replaceState(null, '', here);
   }
   let waiting = false;
   const tab = claimTab({
     asleep,
-    isBusy: () => transferInFlight(),
+    // Anything a reload would lose, not only bytes moving: the new tab waits with "Use here".
+    isBusy: () => pageHolds(),
     onWaiting: () => {
       waiting = true;
       ui.elsewhere.showModal();
     },
     onLost: () => {
+      tabTaken = true;
       try {
         sessionStorage.setItem(ASLEEP_KEY, '1');
+        location.reload();
       } catch {
-        /* then it comes back as a new tab, and takes over again: no worse than before */
+        // Coming back as a new tab would take the device straight back, and the two tabs would
+        // take it from each other for ever. The address says it lost instead.
+        const next = new URL(location.href);
+        next.searchParams.set('asleep', '1');
+        location.replace(next);
       }
-      location.reload();
     },
   });
   // It cannot be dismissed: under it is an app that has not started.
@@ -522,9 +560,26 @@ function untilThisTabIsLive() {
     if (waiting) ui.elsewhere.showModal();
   });
   ui.useHere.onclick = () => tab.takeOver();
-  return tab.live.then(() => {
+  return tab.live.then(async () => {
+    const wasWaiting = waiting;
     waiting = false;
     if (ui.elsewhere.open) ui.elsewhere.close();
+    /*
+     * Given the device while out of sight: the live tab closed - or was only reloading, and is
+     * about to ask for it back. Nothing is started until this tab is looked at, so a reload
+     * elsewhere does not hand the device to a tab nobody is using.
+     */
+    if (wasWaiting && document.hidden) {
+      await new Promise((resolve) => {
+        const seen = () => {
+          if (document.hidden) return;
+          document.removeEventListener('visibilitychange', seen);
+          resolve();
+        };
+        document.addEventListener('visibilitychange', seen);
+      });
+    }
+    tabLive = true;
   });
 }
 
@@ -995,6 +1050,9 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
         if (verifying === existing) {
           verifying = null;
           ui.verify.close();
+          // And asked again with the new words when they come, whoever the device is: what was
+          // held for this answer is still waiting on it.
+          existing.reask = true;
         }
       }
       try {
@@ -1003,7 +1061,14 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
         /* already gone */
       }
       closeRtc(existing);
-      await existing.transfers.attachTransport(transport);
+      // A request to use the relay landing during this wait is kept for after it: followed now,
+      // it would move the old path, and leave the engine on one nothing uses.
+      existing.reattaching = true;
+      try {
+        await existing.transfers.attachTransport(transport);
+      } finally {
+        existing.reattaching = false;
+      }
       existing.transport = transport;
       existing.usingRelay = !wantDirect;
       existing.state = 'connecting';
@@ -1087,7 +1152,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
   session.addEventListener('message', (e) => {
     const conn = own();
     if (e.detail?.t === 'relay-request') {
-      if (!conn) {
+      if (!conn || conn.reattaching) {
         relayAsked = true;
         return;
       }
@@ -1133,6 +1198,13 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
     // Only this session's own connection. See 'peer-gone' below for how another can hold the id.
     if (!conn || conn.session !== session) return;
     conn.sas = e.detail.join(' · ');
+    // Words that were on screen when the key changed, asked again now there are new ones.
+    if (conn.reask) {
+      conn.reask = false;
+      promptVerify(conn, { force: true });
+      render();
+      return;
+    }
     // A remembered device is verified by construction: the pairing root is folded into
     // the key, so only that device could have produced it. Do not nag about it again.
     // A device met through a channel is not nagged either, since there may be a roomful of
@@ -4174,6 +4246,8 @@ async function rememberPair(conn) {
    * addressed to the temporary id would be talking to a connection that no longer answers to it.
    */
   for (const w of heldSends) if (w.connId === oldId) w.connId = id;
+  // A voice message being recorded goes where its conversation now is.
+  if (recorder?.peer === oldId) recorder.peer = id;
   if (chatPeerId === oldId) chatPeerId = id;
   if (waitingSends.has(oldId)) {
     waitingSends.set(id, waitingSends.get(oldId));
@@ -4349,8 +4423,12 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
    * is never out of the document when the browser looks.
    */
   const playing = new Map();
+  const sources = new Set(mediaUrls.values());
   for (const a of ui.chatLog.querySelectorAll('audio')) {
     if (a.paused && !a.currentTime) continue;
+    // Its source still held: closing the conversation revokes them, and a player carried into
+    // the next opening with a dead source would never play again.
+    if (!sources.has(a.src)) continue;
     const id = a.closest('[data-id]')?.dataset.id;
     const wrap = a.closest('.audio-wrap');
     if (id && wrap) playing.set(id, wrap);
@@ -5229,7 +5307,12 @@ function onSwipeReply(row, reply) {
   };
   row.addEventListener('pointerup', end);
   row.addEventListener('pointercancel', end);
-  row.addEventListener('lostpointercapture', end);
+  // The row's own loss only. Taking the finger for the row takes it from the photo, voice note
+  // or quote it started on, and their loss reaches here too; ending on it snapped every swipe
+  // that started on one of them straight back.
+  row.addEventListener('lostpointercapture', (e) => {
+    if (e.target === row) end(e);
+  });
   row.addEventListener(
     'click',
     (e) => {
@@ -5272,7 +5355,10 @@ async function deleteMessages(peerId, list) {
    */
   const live = app.conns.get(peerId);
   for (const m of list) {
-    if (live?.transfers?.out.has(m.id)) live.transfers.abort(m.id, 'unsent').catch(() => {});
+    // One that already arrived is finished, not stopped: "cancelling" it reset the progress of
+    // whatever else was moving to that device.
+    const job = live?.transfers?.out.get(m.id);
+    if (job && job.state !== 'sent') live.transfers.abort(m.id, 'unsent').catch(() => {});
   }
   const items = await Promise.all(
     list.map((m) => chat.identify(m)),
@@ -6098,6 +6184,16 @@ function stopRecording() {
 function cancelRecording() {
   if (!recorder) return;
   recorder.cancelled = true;
+  /*
+   * Still waiting on the microphone: the slot is let go now, not when the request answers. A
+   * prompt dismissed into the address bar never answers, and the slot it held made every later
+   * tap on the mic do nothing until a reload. The answer, if it comes, finds it cancelled.
+   */
+  if (!recorder.mr) {
+    recorder = null;
+    paintRecording();
+    return;
+  }
   stopRecording();
 }
 
@@ -6431,7 +6527,7 @@ function stopChatTransfers(conn) {
     if (conn.transfers.in.has(transferId)) conn.transfers.abort(transferId, 'unsent').catch(() => {});
   }
   for (const [transferId, job] of [...conn.transfers.out]) {
-    if (job.chat) conn.transfers.abort(transferId, 'unsent').catch(() => {});
+    if (job.chat && job.state !== 'sent') conn.transfers.abort(transferId, 'unsent').catch(() => {});
   }
 }
 
@@ -7429,6 +7525,8 @@ function bindUi() {
   });
 
   addEventListener('beforeunload', (e) => {
+    // Taken over by another tab, which the person chose: not leaving, and nothing to ask.
+    if (tabTaken) return;
     if ([...app.conns.values()].some((c) => c.progress)) {
       e.preventDefault();
       e.returnValue = '';
@@ -8410,7 +8508,10 @@ if ('serviceWorker' in navigator) {
   });
   async function reloadIfIdle() {
     if (!updateReady || !document.hidden) return;
-    if (transferInFlight() || app.staged || ui.chatInput?.value || recorder) return;
+    // Only the tab that is running: a waiting one would come back as a new tab and take the
+    // device from the one in use.
+    if (!tabLive) return;
+    if (pageHolds()) return;
     if (await vault.hasPassphrase().catch(() => true)) return;
     if (document.hidden) location.reload();
   }

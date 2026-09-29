@@ -53,12 +53,24 @@ export function claimTab({
     if (holding && e.data?.q === 'busy?') channel.postMessage({ a: 'busy', busy: !!isBusy() });
   });
 
+  /*
+   * A browser that has Web Locks and refuses them - site data blocked, a sandboxed page - is a
+   * browser without them: the tab runs, as every tab did before. Waiting on a lock that will
+   * never be granted left the app unstarted, with nothing on screen to say why.
+   */
+  let refused = false;
+  const refuse = () => {
+    refused = true;
+    becameLive();
+  };
+
   /** Ask for the lock. Resolves true once held, false if `ifAvailable` found it taken. */
   const request = (opts) =>
     new Promise((resolve) => {
       let got = false;
-      locks
-        .request(LOCK_NAME, opts, (lock) => {
+      let asked;
+      try {
+        asked = locks.request(LOCK_NAME, opts, (lock) => {
           if (!lock) {
             resolve(false);
             return undefined;
@@ -70,15 +82,22 @@ export function claimTab({
           resolve(true);
           // Held for the life of the page: closing it is what lets the lock go.
           return new Promise(() => {});
-        })
-        .catch(() => {
-          if (!got) {
-            resolve(false); // the queued request, withdrawn
-            return;
-          }
-          holding = false;
-          onLost();
         });
+      } catch {
+        refuse();
+        resolve(false);
+        return;
+      }
+      asked.catch((err) => {
+        if (!got) {
+          // Withdrawn - the queued request, once this tab took over - or refused outright.
+          if (err?.name !== 'AbortError') refuse();
+          resolve(false);
+          return;
+        }
+        holding = false;
+        onLost();
+      });
     });
 
   const wait = () => {
@@ -103,7 +122,7 @@ export function claimTab({
 
   (async () => {
     if (asleep) return wait();
-    if (await request({ ifAvailable: true })) return;
+    if ((await request({ ifAvailable: true })) || refused) return;
     if (await askBusy()) return wait();
     await request({ steal: true });
   })();

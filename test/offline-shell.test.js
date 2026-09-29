@@ -159,7 +159,7 @@ test('an open app takes a new version the next time it is out of sight, and says
   assert.match(main, /addEventListener\('controllerchange'/);
   const idle = main.slice(main.indexOf('function reloadIfIdle()'), main.indexOf('function reloadIfIdle()') + 900);
   assert.match(idle, /document\.hidden/);
-  assert.match(idle, /transferInFlight\(\)/);
+  assert.match(idle, /pageHolds\(\)/); // which counts a transfer among what would be lost
   assert.match(idle, /location\.reload\(\)/);
   // A resumed app looks for one too, rather than waiting to be relaunched.
   assert.match(main, /getRegistration\(\)[\s\S]{0,40}\.update\(\)/);

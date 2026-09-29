@@ -204,3 +204,10 @@ test('a redraw carries a playing recording across, and closing the conversation 
   const handler = close.slice(0, close.indexOf('});'));
   assert.match(handler, /querySelectorAll\('audio'\)[\s\S]*\.pause\(\)[\s\S]*releaseMedia\(\)/);
 });
+
+test('a paused recording is not carried into a conversation opened again', () => {
+  // Closing the conversation revokes its players' sources; one paused part-way was carried into
+  // the next opening with a dead source and "loaded", and would not play again.
+  const render = source('function renderChat(messages, { locked = false, ephemeral = false, keepScroll = false } = {})');
+  assert.match(render, /mediaUrls/);
+});

@@ -331,7 +331,7 @@ test('a picture or recording deleted while still on its way is stopped on both s
    * the accept sheet, so it arrived whenever that was tapped.
    */
   const del = body('deleteMessages');
-  assert.match(del, /transfers\?\.out\.has\(m\.id\)[\s\S]*abort\(m\.id, 'unsent'\)/, 'the sender does not stop it');
+  assert.match(del, /transfers\?\.out\.get\(m\.id\)[\s\S]*abort\(m\.id, 'unsent'\)/, 'the sender does not stop it');
   const unsend = MAIN.slice(MAIN.indexOf("transfers.addEventListener('unsend'"), MAIN.indexOf("transfers.addEventListener('react'"));
   assert.match(unsend, /chatTransfers\.get\(item\.id\)[\s\S]*abort\(item\.id, 'unsent'\)/, 'the receiver takes it anyway');
   const wipe = MAIN.slice(MAIN.indexOf("transfers.addEventListener('wipe'"), MAIN.indexOf("transfers.addEventListener('wipe-ack'"));
@@ -349,4 +349,12 @@ test('an outgoing job knows it belongs to a conversation', async () => {
   tm.out = new Map();
   const id = await tm.offer([new File(['x'], 'a.png', { type: 'image/png' })], { chat: true });
   assert.equal(tm.out.get(id)?.chat, true);
+});
+
+test('deleting a picture that already arrived stops nothing, and disturbs nothing else', () => {
+  // A finished send stays in the engine as "sent". Deleting its message "cancelled" it, and
+  // the cancellation reset the progress of whatever else was moving to that device.
+  const del = body('deleteMessages');
+  assert.match(del, /job\.state !== 'sent'/);
+  assert.match(body('stopChatTransfers'), /job\.chat && job\.state !== 'sent'/);
 });

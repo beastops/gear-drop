@@ -42,3 +42,14 @@ test('a store this browser does not have is not a store that failed to clear', a
   assert.equal(again.files, true);
   assert.equal(again.caches, true);
 });
+
+test('a store that failed, rather than one that is not there, is still reported', async () => {
+  // A private window refusing it is nothing to clear; a store that exists and threw for some
+  // other reason may still hold received files, in the clear, and must not be called erased.
+  Object.defineProperty(globalThis.navigator, 'storage', {
+    value: { getDirectory: async () => { throw Object.assign(new Error('busy'), { name: 'UnknownError' }); } },
+    configurable: true,
+  });
+  const { wipe } = await import('../web/core/store.js');
+  assert.equal((await wipe()).files, false);
+});

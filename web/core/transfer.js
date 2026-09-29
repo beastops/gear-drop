@@ -49,6 +49,11 @@ function cleanUnsend(item) {
   };
 }
 const READ_AHEAD = 6; // prepared frames kept in flight
+/**
+ * Chunks in a row that do not open before a receive is failed. Far more than a cancelled
+ * transfer can leave in flight (the read-ahead plus a send buffer), far fewer than a file.
+ */
+const UNOPENED_LIMIT = 256;
 const ACK_EVERY = 4 * 1024 * 1024;
 
 /*
@@ -663,6 +668,13 @@ export class TransferManager extends EventTarget {
    */
   _pumpFailed(job, err) {
     job.pumping = false;
+    /*
+     * Except the link going: that is a pause, not a failure. The loop ends by telling the other
+     * side each file is done, and a link lost at that moment throws there; the job stays, and
+     * the receiver's request to continue restarts it once there is a link again.
+     */
+    const m = String(err?.message || '');
+    if (m.includes('control path is not open') || m.includes('control frame was not sent')) return;
     job.state = 'aborted';
     this.out.delete(job.transferId);
     this._sendCtl({ t: 'abort', transferId: job.transferId, reason: 'failed' }).catch(() => {});
@@ -1064,9 +1076,15 @@ export class TransferManager extends EventTarget {
        * relay's outer seal and DTLS both stand in front of this. A chunk this transfer really
        * needed is still missing, and the wait for the bytes and the root check at the end are
        * what catch that.
+       *
+       * A few left over is that. A long run with none opening is the two sides on different
+       * keys, and is said at once rather than after the whole file has gone past.
        */
+      job.unopened = (job.unopened || 0) + 1;
+      if (job.unopened >= UNOPENED_LIMIT) this._fail(job, 'chunk failed authentication');
       return;
     }
+    job.unopened = 0;
 
     // The tag goes into the integrity tree only now. Writing it as the frame arrived meant
     // a frame that never authenticated could still overwrite the record of one that had.

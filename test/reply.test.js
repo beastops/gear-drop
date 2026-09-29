@@ -200,3 +200,13 @@ test('the phone keeps its own long-press off messages', () => {
   const selectable = coarse.slice(coarse.indexOf('-webkit-touch-callout: default') - 400, coarse.indexOf('-webkit-touch-callout: default'));
   assert.doesNotMatch(selectable, /\.bubble,/);
 });
+
+test('a swipe is not ended by its own photo handing the finger over', () => {
+  /*
+   * On a touch screen the element under the finger holds it; when the swipe takes the finger
+   * for the row, the photo, the voice note or the quote under it loses it, and that event
+   * reaches the row. Taken as the row losing it, every swipe that started on one of those
+   * snapped back at once. Only the row's own loss ends it.
+   */
+  assert.match(body('function onSwipeReply(row, reply)'), /row\.addEventListener\('lostpointercapture', \(e\) => \{\s*if \(e\.target === row\) end\(e\);/);
+});

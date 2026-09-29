@@ -348,12 +348,16 @@ export async function wipe() {
    * failure meant the erase never finished on those browsers, however often it was tried.
    */
   let root = null;
-  try {
-    root = (await navigator.storage?.getDirectory?.()) || null;
-  } catch {
-    root = null;
+  if (!navigator.storage?.getDirectory) done.files = true;
+  else {
+    try {
+      root = await navigator.storage.getDirectory();
+    } catch (err) {
+      // Refused, as a private window refuses it: nothing can be there. Any other failure may be
+      // a store that does hold received files, in the clear, and is not reported as erased.
+      if (err?.name === 'SecurityError') done.files = true;
+    }
   }
-  if (!root) done.files = true;
   try {
     if (root) {
       for await (const [name, handle] of root.entries()) {

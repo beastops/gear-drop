@@ -65,7 +65,7 @@ function rig({ micDelay = 20, peer = 'p1' } = {}) {
   const navigator = {
     mediaDevices: {
       getUserMedia: () =>
-        new Promise((resolve) =>
+        micDelay === null ? new Promise(() => {}) : new Promise((resolve) =>
           setTimeout(() => {
             const track = { live: true, stop() { this.live = false; } };
             tracks.push(track);
@@ -140,4 +140,22 @@ test('a finished recording goes to the conversation it was recorded in', async (
   await pause(20);
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], 'p1');
+});
+
+test('a recording follows its conversation when the device is paired mid-way', () => {
+  // Pairing re-files the conversation under a new id. The recording kept the old one and, on
+  // stop, was sent to a connection that no longer answered to it - dropped without a word.
+  const at = MAIN.indexOf('async function rememberPair(conn)');
+  const pair = MAIN.slice(at, MAIN.indexOf('\n}\n', at));
+  assert.match(pair, /if \(recorder\?\.peer === oldId\) recorder\.peer = id;/);
+});
+
+test('a microphone request left unanswered does not block recording until a reload', () => {
+  // A permission prompt dismissed into the address bar never settles. The slot it held made
+  // every later tap on the mic do nothing, even in a conversation opened again.
+  const { api, tracks } = rig({ micDelay: null }); // a request that never answers
+  api.startRecording();
+  api.cancelRecording(); // the conversation closed
+  assert.equal(api.recorder, null, 'the slot stays taken');
+  void tracks;
 });

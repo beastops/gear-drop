@@ -225,3 +225,20 @@ test('a closed transport answers nothing, and builds nothing', async () => {
   t.close();
   assert.equal(session.transportLive, true);
 });
+
+test('an offer answered before the link is started is not thrown away by starting it', async () => {
+  // Frames that arrive while a session is being confirmed are now kept, so the other side's
+  // offer can be answered before this side gets round to start(). start() then built lane 0
+  // again over the one that had just answered, and the direct link never formed.
+  const session = fakeSession();
+  session.lane = 1; // the answerer
+  const t = new Transport(session, {});
+  FakePC.made = 0;
+  session.dispatchEvent(new CustomEvent('message', { detail: { t: 'offer', gen: 0, lane: 0, sdp: OFFER } }));
+  await settle();
+  const answered = t.lanes[0]?.pc;
+  assert.ok(answered, 'the offer was not answered');
+  await t.start();
+  assert.equal(t.lanes[0].pc, answered, 'lane 0 was rebuilt over the one that answered');
+  assert.equal(FakePC.made, 1);
+});

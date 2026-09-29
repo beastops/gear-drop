@@ -59,7 +59,9 @@ export class Transport extends EventTarget {
   /* ------------------------------------------------------------ lifecycle */
 
   async start() {
-    await this._makeLane(0, true);
+    // An offer that arrived first has already made lane 0 and answered on it; building it
+    // again threw that answer away and the direct link never formed.
+    if (!this.lanes[0]) await this._makeLane(0, true);
     if (this.isOfferer) await this._negotiate(0);
     return this;
   }

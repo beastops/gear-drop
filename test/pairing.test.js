@@ -248,3 +248,15 @@ test('a paired device that leaves the network stops being marked as on it', () =
   assert.match(make, /member\.pairedId = known\.id;/);
   assert.match(make, /if \(gone\?\.pairedId\) app\.alsoOn\.get\(gone\.pairedId\)\?\.delete\(kind\);/);
 });
+
+test('words closed by a re-key are asked again, and a relay request waits for the re-attach', () => {
+  const secure = handler('secure');
+  // Closed because they were for the old key - and then nothing asked again for a device met on
+  // the network, so what was held for that answer waited on a question nobody would see.
+  assert.match(secure, /existing\.reask = true;/);
+  assert.match(handler('sas'), /if \(conn\.reask\) \{\s*conn\.reask = false;\s*promptVerify\(conn, \{ force: true \}\);/);
+  // A request to use the relay that lands while the engine is being moved onto the new path
+  // was followed on the old one, and the engine was left on a transport nothing used.
+  assert.match(secure, /existing\.reattaching = true;[\s\S]*await existing\.transfers\.attachTransport\(transport\);[\s\S]*existing\.reattaching = false;/);
+  assert.match(handler('message'), /if \(!conn \|\| conn\.reattaching\) \{\s*relayAsked = true;/);
+});

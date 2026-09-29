@@ -213,3 +213,57 @@ test('nothing reaches the network, or asks for a passphrase, before this tab is 
   assert.ok(gate < boot.indexOf('app.signal.connect()'), 'before the relay socket');
   assert.match(HTML, /id="elsewhere"/);
 });
+
+test('a browser that has Web Locks but refuses them still starts', async () => {
+  /*
+   * Site data blocked, or a sandboxed page: navigator.locks is there and every request is
+   * refused. The tab waited for a lock it could never get and the app never started - no
+   * dialog, no error. Refused is treated as not there, and the tab runs, as it did before.
+   */
+  const refusing = {
+    request: () => Promise.reject(Object.assign(new Error('Access to the Locks API is denied in this context'), { name: 'SecurityError' })),
+  };
+  const tab = claimTab({ locks: refusing, makeChannel: fakeChannels(), askMs: 20 });
+  const started = await Promise.race([tab.live.then(() => true), tick(300).then(() => false)]);
+  assert.equal(started, true, 'the app never started');
+
+  const throwing = { request() { throw new TypeError('not here'); } };
+  const again = claimTab({ locks: throwing, makeChannel: fakeChannels(), askMs: 20 });
+  assert.equal(await Promise.race([again.live.then(() => true), tick(300).then(() => false)]), true);
+});
+
+test('tabs hand over without fighting, whatever the page is doing', () => {
+  const live = MAIN.slice(MAIN.indexOf('function untilThisTabIsLive()'), MAIN.indexOf('function bootStep('));
+  // A tab given the lock while out of sight - the live one was only reloading - waits to be
+  // looked at before it starts, so a reload does not hand the device to a hidden tab.
+  assert.match(live, /if \(wasWaiting && document\.hidden\)/);
+  // Where session storage cannot be written, the note that a tab lost travels in the address,
+  // or two tabs would take it from each other for ever.
+  assert.match(live, /searchParams\.set\('asleep', '1'\)/);
+  assert.match(live, /searchParams\.has\('asleep'\)/);
+  // Being taken over is not leaving the site: no "leave site?" prompt to hold the old tab open.
+  assert.match(live, /tabTaken = true;/);
+  const unload = MAIN.slice(MAIN.indexOf("addEventListener('beforeunload'"), MAIN.indexOf("addEventListener('beforeunload'") + 300);
+  assert.match(unload, /if \(tabTaken\) return;/);
+});
+
+test('only the live tab reloads for a new version, and only when nothing would be lost', () => {
+  const idle = MAIN.slice(MAIN.indexOf('async function reloadIfIdle()'), MAIN.indexOf('async function reloadIfIdle()') + 1400);
+  // A waiting tab reloading comes back as a new tab and takes the device from the one in use.
+  assert.match(idle, /if \(!tabLive\) return;/);
+  assert.match(idle, /pageHolds\(\)/);
+  // What a reload would lose: bytes moving, files picked, words typed, a recording, a code
+  // waiting to be typed on the other device, the safety words on screen, any sheet open, or a
+  // conversation with a device that is not paired, which lasts only as long as the tab.
+  const holds = MAIN.slice(MAIN.indexOf('function pageHolds()'), MAIN.indexOf('function pageHolds()') + 900);
+  for (const what of [/transferInFlight\(\)/, /app\.staged/, /chatInput\?\.value/, /recorder/, /app\.hostCode/, /verifying/, /modalStack\.length/, /!c\.peer/]) {
+    assert.match(holds, what);
+  }
+});
+
+test('a second tab does not take the device from one holding something a reload would lose', () => {
+  // Only moving bytes counted as busy, so opening the site again reloaded the first tab from
+  // under a message being typed, a recording or files picked to send.
+  const live = MAIN.slice(MAIN.indexOf('function untilThisTabIsLive()'), MAIN.indexOf('function bootStep('));
+  assert.match(live, /isBusy: \(\) => pageHolds\(\)/);
+});
