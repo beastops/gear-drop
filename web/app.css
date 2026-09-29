@@ -438,6 +438,18 @@ body {
   height: 100%;
   margin: 0;
 }
+/*
+ * No pull-to-refresh.
+ *
+ * On a phone, pulling down at the top of the page reloads it, and a reload here is not a
+ * refresh: it drops every connection and stops any transfer. Nothing on this page scrolls as a
+ * whole anyway - the lists that do scroll contain their own overscroll - so the gesture only
+ * ever did harm.
+ */
+html,
+body {
+  overscroll-behavior: none;
+}
 
 body {
   /*
@@ -4630,3 +4642,76 @@ body.theme-light .setting-row {
   opacity: 0.45;
   letter-spacing: 0.02em;
 }
+
+/* ───────────────────────────── a picture, full screen ───────────────────────────── */
+
+/*
+ * Tapped in the conversation, a photo fills the screen on black, the way a phone's own viewer
+ * shows one. The black is the dialog's own background rather than its backdrop, so it can fade
+ * as the picture is dragged away: `--viewer-fade` is set from the drag in `ui/viewer.js`.
+ */
+dialog.viewer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  color: #fff;
+  background: rgb(0 0 0 / calc(0.94 * var(--viewer-fade, 1)));
+}
+dialog.viewer::backdrop { background: transparent; }
+dialog.viewer[open] { animation: viewer-in var(--t) var(--ease) both; }
+@keyframes viewer-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.viewer-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  /* Every gesture on the picture is the viewer's: pinch, pan, drag to close. */
+  touch-action: none;
+}
+.viewer-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}
+.viewer-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
+  pointer-events: none; /* only the buttons, so the picture can be dragged right up to them */
+  opacity: var(--viewer-fade, 1);
+}
+.viewer-btn {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.14);
+  color: #fff;
+  cursor: pointer;
+}
+.viewer-btn svg { width: 20px; height: 20px; }
+.viewer-btn:hover { background: rgb(255 255 255 / 0.22); }
+/* The picture in a bubble says it can be opened. */
+.bubble-photo { cursor: zoom-in; }

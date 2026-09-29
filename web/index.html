@@ -49,6 +49,8 @@
 <link rel="modulepreload" href="core/wordlist.js">
 <link rel="modulepreload" href="ui/i18n.js">
 <link rel="modulepreload" href="ui/swipe.js">
+<link rel="modulepreload" href="ui/back.js">
+<link rel="modulepreload" href="ui/viewer.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/curve.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/edwards.js">
 <link rel="modulepreload" href="vendor/@noble/curves/abstract/hash-to-curve.js">
@@ -687,6 +689,24 @@
   The conversation. Sealed with the same key the app uses for its own identity and keyed on
   the peer, so it is simply there again the next time that device is.
 -->
+<!--
+  A picture from the conversation, full screen. Filled from script; see ui/viewer.js.
+  A dialog like every sheet, so Back and Escape close it without anything special.
+-->
+<dialog id="photo-viewer" class="viewer" data-no-swipe data-i18n-label="a11y.photo" aria-label="Photo">
+  <div class="viewer-stage">
+    <img alt="" draggable="false" />
+  </div>
+  <div class="viewer-bar">
+    <button class="viewer-btn viewer-close" type="button" data-i18n-label="a11y.close" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg>
+    </button>
+    <button class="viewer-btn viewer-save" type="button" data-i18n-label="chat.save" aria-label="Save this picture">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-install"/></svg>
+    </button>
+  </div>
+</dialog>
+
 <dialog id="chat-dialog" class="sheet" aria-labelledby="chat-title">
   <div class="sheet-body rail-accent chat-sheet">
     <!--
@@ -909,6 +929,7 @@
   <symbol id="i-install" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v10.2"/><path d="M8.2 10.2 12 14l3.8-3.8"/><path d="M4.4 17.2v1.9a1.4 1.4 0 0 0 1.4 1.4h12.4a1.4 1.4 0 0 0 1.4-1.4v-1.9"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.4 13.6a3.6 3.6 0 0 0 5.1 0l2.6-2.6a3.6 3.6 0 1 0-5.1-5.1l-1 1"/><path d="M13.6 10.4a3.6 3.6 0 0 0-5.1 0l-2.6 2.6a3.6 3.6 0 1 0 5.1 5.1l1-1"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5.8 12h12.4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
   <symbol id="i-dots" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.3" r="1.55" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.55" fill="currentColor" stroke="none"/><circle cx="12" cy="18.7" r="1.55" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="m9 6 6 6-6 6"/>

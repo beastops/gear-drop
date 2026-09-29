@@ -339,6 +339,7 @@ const en = {
   /* spoken and hover labels: no visible text of their own */
 
   'a11y.close': 'Close',
+  'a11y.photo': 'Photo',
   'a11y.preview': 'Preview of the picture being offered',
   'a11y.devices': 'Devices',
   'a11y.discovery': 'Who can find you',

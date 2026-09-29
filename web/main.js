@@ -56,6 +56,8 @@ import { safeFileName, safePathSegments, riskOf } from './core/filename.js';
 import { Channel } from './core/channel.js';
 import { LOCALES, currentLocale, loadLocales, preferredLocale, setLocale, setText, t } from './ui/i18n.js';
 import { enableSwipeToDismiss, enableSwipeUpToDismiss } from './ui/swipe.js';
+import { createBackStack } from './ui/back.js';
+import { openViewer } from './ui/viewer.js';
 import { captureDust } from './core/dust.js';
 
 const te = new TextEncoder();
@@ -304,6 +306,9 @@ const app = {
     // made, without asking. See `offerRelay`. A value stored by an older version is ignored.
   },
 };
+
+/** Back closes what is in front, a menu before the sheet under it. See `ui/back.js`. */
+const back = createBackStack();
 
 /** The resting tab icon, remembered before the progress ring ever replaces it. */
 let baseFavicon = null;
@@ -2339,7 +2344,11 @@ function buildTile(entry) {
   el.addEventListener('pointerdown', (e) => {
     opened = false;
     if (e.button !== 0) return; // a right-click has its own event, and it fires first
-    holdTimer = setTimeout(openMenu, 500);
+    // The same light tick a held message gives, where the device can give one.
+    holdTimer = setTimeout(() => {
+      navigator.vibrate?.(12);
+      openMenu();
+    }, 500);
   });
   for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) {
     el.addEventListener(ev, () => {
@@ -2781,8 +2790,9 @@ let openMenu = null;
 
 function closeMenu() {
   if (!openMenu) return;
-  const { el, tile } = openMenu;
+  const { el, tile, back: gave } = openMenu;
   openMenu = null;
+  gave?.();
   tile?.classList.remove('menu-open');
 
   // Let it animate out, but never leave a node behind if the animation does not run, whether
@@ -2906,7 +2916,7 @@ function openDeviceMenu(entry, anchor, tile) {
   el.style.top = `${Math.round(Math.max(8, top))}px`;
 
   tile?.classList.add('menu-open');
-  openMenu = { el, tile };
+  openMenu = { el, tile, back: back.open(() => closeMenu()) };
 }
 
 function deviceFacts(conn, entry, paired) {
@@ -4182,7 +4192,7 @@ function openBubbleMenu(m, row) {
   el.style.top = `${Math.round(Math.max(8, top))}px`;
 
   row.classList.add('menu-open');
-  openMenu = { el, tile: row };
+  openMenu = { el, tile: row, back: back.open(() => closeMenu()) };
 }
 
 /**
@@ -4343,6 +4353,16 @@ function photoFigure(m) {
       return;
     }
     showUndrawable(wrap, img);
+  });
+  // Tapped, it opens full screen. A hold is the message's menu instead, and `onHold`
+  // swallows the click that follows one.
+  img.addEventListener('click', () => {
+    if (!img.currentSrc) return; // still decrypting, or could not be drawn
+    openViewer(document.getElementById('photo-viewer'), {
+      src: img.currentSrc,
+      alt: m.name || '',
+      onSave: () => saveChatMedia(m),
+    });
   });
   wrap.append(img);
 
@@ -6349,8 +6369,18 @@ function watchModals() {
       const at = modalStack.indexOf(d);
       if (d.open) {
         if (at < 0) modalStack.push(d);
-      } else if (at >= 0) {
-        modalStack.splice(at, 1);
+        // Back asks it to go the way Escape does, so a sheet that must be answered can refuse.
+        d.gdBack ??= back.open(() => {
+          if (!d.open) return true;
+          if (!d.dispatchEvent(new Event('cancel', { cancelable: true }))) return false;
+          d.close();
+          return true;
+        });
+      } else {
+        if (at >= 0) modalStack.splice(at, 1);
+        const gave = d.gdBack;
+        d.gdBack = null;
+        gave?.();
       }
     }
     sync();
