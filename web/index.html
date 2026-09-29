@@ -770,6 +770,17 @@
     -->
     <p class="chat-note muted small" id="chat-gone" data-i18n="chat.gone" hidden>This device has gone. Devices you haven’t paired with get a new name each time they join, so this chat can’t carry on. Pair to keep the next one.</p>
 
+    <!-- What the next message answers, when one has been swiped or chosen. Filled from script. -->
+    <div class="chat-reply" id="chat-reply" hidden>
+      <svg class="chat-reply-mark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-reply"/></svg>
+      <div class="chat-reply-body">
+        <span class="chat-reply-who" id="chat-reply-who"></span>
+        <span class="chat-reply-text" id="chat-reply-text"></span>
+      </div>
+      <button class="close-x chat-reply-cancel" id="btn-chat-reply-cancel" type="button" data-i18n-label="chat.cancelReply" aria-label="Cancel reply">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
+    </div>
     <form class="chat-composer" id="chat-composer">
       <!--
         Pictures and files go through the same offer the tile uses, so the receiving side sees
@@ -930,6 +941,7 @@
   <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.4 13.6a3.6 3.6 0 0 0 5.1 0l2.6-2.6a3.6 3.6 0 1 0-5.1-5.1l-1 1"/><path d="M13.6 10.4a3.6 3.6 0 0 0-5.1 0l-2.6 2.6a3.6 3.6 0 1 0 5.1 5.1l1-1"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5.8 12h12.4"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-reply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5 4.5 11.5l5 5"/><path d="M4.5 11.5h9.2a5.8 5.8 0 0 1 5.8 5.8v.2"/></symbol>
   <symbol id="i-dots" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.3" r="1.55" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.55" fill="currentColor" stroke="none"/><circle cx="12" cy="18.7" r="1.55" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="m9 6 6 6-6 6"/>

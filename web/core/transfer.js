@@ -380,7 +380,11 @@ export class TransferManager extends EventTarget {
         // not shaped like one is dropped, and the message is stored under an id of our own.
         return this.dispatchEvent(
           new CustomEvent('text', {
-            detail: { body: String(msg.body ?? '').slice(0, MAX_TEXT), mid: isMessageId(msg.mid) ? msg.mid : '' },
+            detail: {
+              body: String(msg.body ?? '').slice(0, MAX_TEXT),
+              mid: isMessageId(msg.mid) ? msg.mid : '',
+              re: isMessageId(msg.re) ? msg.re : '',
+            },
           }),
         );
       case 'unsend': {
@@ -445,9 +449,10 @@ export class TransferManager extends EventTarget {
    * Send a short message. It rides the same sealed control channel as everything else, so
    * the relay sees ciphertext padded to a block boundary, not even its length.
    */
-  sendText(text, mid = '') {
+  sendText(text, mid = '', re = '') {
     const msg = { t: 'text', body: String(text).slice(0, MAX_TEXT) };
     if (isMessageId(mid)) msg.mid = mid;
+    if (isMessageId(re)) msg.re = re; // the message this answers, by id and nothing else
     return this._sendCtl(msg, TEXT_BLOCK);
   }
 

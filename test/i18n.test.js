@@ -33,6 +33,7 @@ const WITH_VARS = new Set([
   'incoming.many',
   'toast.verifiedWaiting',
   'toast.sendWhenReady',
+  'chat.replyingTo',
   'toast.sendLost',
   'chat.unsendLater',
   'chat.unsendHereOnly',

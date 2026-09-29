@@ -157,9 +157,9 @@ test('a message goes out with its id, and arrives with it', async () => {
   await TransferManager.prototype._onCtl.call(tm, { t: 'text', body: 'old client' });
   await TransferManager.prototype._onCtl.call(tm, { t: 'text', body: 'bad', mid: '<script>' });
   assert.deepEqual(got, [
-    { body: 'hi', mid: id },
-    { body: 'old client', mid: '' },
-    { body: 'bad', mid: '' },
+    { body: 'hi', mid: id, re: '' },
+    { body: 'old client', mid: '', re: '' },
+    { body: 'bad', mid: '', re: '' },
   ]);
 });
 
@@ -203,9 +203,10 @@ const MAIN = fs.readFileSync(path.join(ROOT, 'web', 'main.js'), 'utf8');
 
 test('every message this app writes carries an id the other side will share', () => {
   // Text sent now, text sent from the outbox later, and a picture, which is named by its transfer.
-  assert.match(MAIN, /conn\.transfers\.sendText\(body, id\)/);
-  assert.match(MAIN, /conn\.transfers\.sendText\(m\.text, m\.id\)/);
-  assert.match(MAIN, /chat\.append\(conn\.id, \{ dir: 'in', text: body, id: mid \}\)/);
+  // A reply adds what it answers after the id; the id is what this checks.
+  assert.match(MAIN, /conn\.transfers\.sendText\(body, id(, re)?\)/);
+  assert.match(MAIN, /conn\.transfers\.sendText\(m\.text, m\.id(, m\.re)?\)/);
+  assert.match(MAIN, /chat\.append\(conn\.id, \{ dir: 'in', text: body, id: mid(, re)? \}\)/);
   assert.match(MAIN, /id: transferId,/);
 });
 

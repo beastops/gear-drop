@@ -187,6 +187,10 @@ const ui = {
   chatSend: $('btn-chat-send'),
   chatClear: $('btn-chat-clear'),
   chatAttach: $('btn-chat-attach'),
+  chatReply: $('chat-reply'),
+  chatReplyWho: $('chat-reply-who'),
+  chatReplyText: $('chat-reply-text'),
+  chatReplyCancel: $('btn-chat-reply-cancel'),
   lockDialog: $('lock-dialog'),
   lockNow: $('btn-lock-now'),
   lockChange: $('btn-lock-change'),
@@ -2830,7 +2834,7 @@ function closeMenu() {
   const { el, tile, back: gave } = openMenu;
   openMenu = null;
   gave?.();
-  tile?.classList.remove('menu-open');
+  tile?.classList.remove('menu-open', 'focused');
 
   // Let it animate out, but never leave a node behind if the animation does not run, whether
   // from reduced motion, a backgrounded tab, or a browser that skipped the frame.
@@ -4049,6 +4053,10 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
     if (shown.has(m.id)) row.classList.add('settled');
     // Held, or right-clicked: what can be done with this message, delete included.
     onHold(row, () => openBubbleMenu(m, row));
+    // Swiped to the right: answer it.
+    onSwipeReply(row, () => startReply(m));
+    // Answering something: what it answers, above the words.
+    if (m.re) row.append(quoteFor(m, messages));
     // Written, not yet gone. The mark is on the bubble rather than in a status line, because
     // it is a fact about this message and not about the conversation.
     if (m.pending) row.classList.add('waiting');
@@ -4068,7 +4076,8 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
       tools.append(bubbleTool('#i-install', t('chat.saveAudio'), () => saveChatMedia(m)));
     } else {
       // Peer text, always as a text node. Never innerHTML, on either side.
-      row.textContent = m.text;
+      // Appended, not assigned: the reply arrow and any quote are already in the bubble.
+      row.append(document.createTextNode(m.text));
       tools.append(
         bubbleTool('#i-file', t('chat.copy'), async () => {
           try {
@@ -4133,7 +4142,7 @@ function onHold(el, open) {
   };
   el.addEventListener('pointerdown', (e) => {
     fired = false;
-    if (e.button !== 0 || e.target.closest?.('button, a, input, .audio-track')) return;
+    if (e.button !== 0 || e.target.closest?.('button:not(.bubble-quote), a, input, .audio-track')) return;
     from = { x: e.clientX, y: e.clientY };
     el.classList.add('pressing');
     timer = setTimeout(() => {
@@ -4165,6 +4174,15 @@ function onHold(el, open) {
 function openBubbleMenu(m, row) {
   closeMenu();
   const peerId = chatPeerId;
+  /*
+   * On a phone, the whole screen. The message lifts over a darkened conversation with its
+   * actions underneath, the way the phone's own messaging apps do it: a small menu tucked
+   * beside a bubble is hard to hit with a thumb and easy to miss. A computer, where a pointer
+   * can reach anything precisely, keeps the small one.
+   */
+  if (matchMedia('(pointer: coarse)').matches) {
+    return openFocusMenu(m, row, bubbleActions(m, peerId));
+  }
   const el = document.createElement('div');
   el.className = 'menu bubble-menu';
   el.setAttribute('role', 'menu');
@@ -4188,22 +4206,10 @@ function openBubbleMenu(m, row) {
     el.append(b);
   };
 
-  if (m.kind === 'image') item(t('chat.save'), '#i-install', () => saveChatMedia(m));
-  else if (m.kind === 'audio') item(t('chat.saveAudio'), '#i-install', () => saveChatMedia(m));
-  else {
-    item(t('chat.copy'), '#i-file', async () => {
-      try {
-        await navigator.clipboard.writeText(m.text);
-        toast(t('chat.copied'), 'good');
-      } catch {
-        toast(t('toast.copyFailed'), 'bad');
-      }
-    });
-    const url = soleUrl(m.text);
-    if (url) item(t('recv.open'), '#i-link', () => window.open(url, '_blank', 'noopener,noreferrer'));
+  for (const a of bubbleActions(m, peerId)) {
+    if (a.danger) el.append(Object.assign(document.createElement('div'), { className: 'menu-sep' }));
+    item(a.label, a.icon, a.run, { danger: a.danger });
   }
-  el.append(Object.assign(document.createElement('div'), { className: 'menu-sep' }));
-  item(t('chat.deleteEveryone'), '#i-trash', () => deleteMessages(peerId, [m]), { danger: true });
 
   /*
    * Above the conversation, which is a modal dialog in the top layer. A menu appended to the
@@ -4230,6 +4236,283 @@ function openBubbleMenu(m, row) {
 
   row.classList.add('menu-open');
   openMenu = { el, tile: row, back: back.open(() => closeMenu()) };
+}
+
+/** What can be done with one message, in the order a menu shows it. */
+function bubbleActions(m, peerId) {
+  const out = [];
+  // Answering is for a conversation that can still be written to.
+  if (!ui.chatInput.disabled) out.push({ label: t('chat.reply'), icon: '#i-reply', run: () => startReply(m) });
+  if (m.kind === 'image') out.push({ label: t('chat.save'), icon: '#i-install', run: () => saveChatMedia(m) });
+  else if (m.kind === 'audio') out.push({ label: t('chat.saveAudio'), icon: '#i-install', run: () => saveChatMedia(m) });
+  else {
+    out.push({
+      label: t('chat.copy'),
+      icon: '#i-file',
+      run: async () => {
+        try {
+          await navigator.clipboard.writeText(m.text);
+          toast(t('chat.copied'), 'good');
+        } catch {
+          toast(t('toast.copyFailed'), 'bad');
+        }
+      },
+    });
+    const url = soleUrl(m.text);
+    if (url) out.push({ label: t('recv.open'), icon: '#i-link', run: () => window.open(url, '_blank', 'noopener,noreferrer') });
+  }
+  out.push({ label: t('chat.deleteEveryone'), icon: '#i-trash', run: () => deleteMessages(peerId, [m]), danger: true });
+  return out;
+}
+
+/**
+ * The message being held, lifted over the whole screen, with its actions underneath.
+ *
+ * A copy of the bubble is drawn where the bubble is, over a darkened conversation, and nudged
+ * up if the actions would not otherwise fit below it; the original is hidden underneath so the
+ * two never show at once. It is a popover, so it sits above the conversation's own dialog, and
+ * it is the open menu as far as the rest of the page is concerned: Back, Escape and a tap
+ * anywhere outside the actions all close it the way they close any menu.
+ */
+function openFocusMenu(m, row, actions) {
+  const layer = document.createElement('div');
+  layer.className = 'focus-layer';
+  layer.setAttribute('role', 'dialog');
+  layer.setAttribute('aria-modal', 'true');
+  layer.setAttribute('aria-label', t('chat.actions'));
+
+  const dim = document.createElement('div');
+  dim.className = 'focus-dim';
+  layer.append(dim);
+
+  const r = row.getBoundingClientRect();
+  const lifted = row.cloneNode(true);
+  lifted.classList.remove('pressing', 'menu-open', 'settled', 'swiping');
+  lifted.classList.add('focus-bubble');
+  lifted.querySelector('.bubble-tools')?.remove();
+  lifted.querySelector('.reply-cue')?.remove();
+  lifted.removeAttribute('data-id');
+  lifted.style.left = `${r.left}px`;
+  lifted.style.top = `${r.top}px`;
+  lifted.style.width = `${r.width}px`;
+  layer.append(lifted);
+
+  const list = document.createElement('div');
+  list.className = 'menu focus-menu';
+  list.setAttribute('role', 'menu');
+  for (const a of actions) {
+    if (a.danger && list.childElementCount) list.append(Object.assign(document.createElement('div'), { className: 'menu-sep' }));
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'menu-item' + (a.danger ? ' danger' : '');
+    b.setAttribute('role', 'menuitem');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', a.icon);
+    svg.append(use);
+    const span = document.createElement('span');
+    span.textContent = a.label;
+    b.append(span, svg);
+    b.addEventListener('click', () => {
+      closeMenu();
+      a.run();
+    });
+    list.append(b);
+  }
+  layer.append(list);
+
+  layer.popover = 'manual';
+  document.body.append(layer);
+  layer.showPopover();
+
+  /*
+   * Where things go. The actions sit under the message on its own side; if they would run off
+   * the bottom, the message is lifted by however much is needed, and a message taller than the
+   * screen allows is clipped rather than pushing the actions out of reach.
+   */
+  const gap = 10;
+  const edge = 16;
+  const h = list.offsetHeight;
+  const w = list.offsetWidth;
+  const menuTop = Math.min(r.bottom + gap, innerHeight - h - edge);
+  const lift = Math.min(0, menuTop - gap - r.bottom);
+  const top = Math.max(edge, r.top + lift);
+  if (r.top + lift < edge) lifted.style.maxHeight = `${Math.max(60, menuTop - gap - edge)}px`;
+  lifted.style.setProperty('--lift', `${top - r.top}px`);
+  const left = m.dir === 'out' ? r.right - w : r.left;
+  list.style.left = `${Math.round(Math.min(Math.max(edge, left), innerWidth - w - edge))}px`;
+  list.style.top = `${Math.round(menuTop)}px`;
+  list.style.transformOrigin = m.dir === 'out' ? 'top right' : 'top left';
+
+  dim.addEventListener('click', () => closeMenu());
+  lifted.addEventListener('click', () => closeMenu());
+
+  row.classList.add('menu-open', 'focused');
+  openMenu = { el: layer, tile: row, back: back.open(() => closeMenu()) };
+}
+
+/** Answer this message: the bar above the keyboard says which, and the next message does. */
+let replyTo = null;
+
+function startReply(m) {
+  if (ui.chatInput.disabled) return;
+  replyTo = m;
+  const who = m.dir === 'out' ? t('chat.you') : ui.chatWho.textContent;
+  ui.chatReplyWho.textContent = t('chat.replyingTo', { name: who });
+  ui.chatReplyText.textContent = snippetOf(m);
+  ui.chatReply.hidden = false;
+  ui.chatInput.focus();
+}
+
+function cancelReply() {
+  replyTo = null;
+  if (ui.chatReply) ui.chatReply.hidden = true;
+}
+
+/** A line that stands for a message in a quote. Words from this side's own copy only. */
+function snippetOf(m) {
+  if (m.kind === 'image') return t('chat.photo');
+  if (m.kind === 'audio') return m.voice ? t('chat.voiceNote') : t('chat.audio');
+  const text = String(m.text || '').replace(/\s+/g, ' ').trim();
+  return text.length > 90 ? text.slice(0, 89) + '…' : text;
+}
+
+/**
+ * What a reply answers, drawn at the top of it.
+ *
+ * Looked up here by id, from this device's own copy of the conversation, never carried in the
+ * reply itself. So a message deleted for everyone leaves nothing of itself behind in the
+ * replies to it: they say it is not there any more. Tapping the quote goes to the original.
+ */
+function quoteFor(m, messages) {
+  const q = document.createElement('button');
+  q.type = 'button';
+  q.className = 'bubble-quote';
+  const who = document.createElement('span');
+  who.className = 'bubble-quote-who';
+  const text = document.createElement('span');
+  text.className = 'bubble-quote-text';
+  const original = messages.find((x) => x.id === m.re);
+  if (original) {
+    who.textContent = original.dir === 'out' ? t('chat.you') : ui.chatWho.textContent;
+    text.textContent = snippetOf(original);
+    q.addEventListener('click', (e) => {
+      e.stopPropagation();
+      jumpTo(original.id);
+    });
+  } else {
+    q.classList.add('gone');
+    text.textContent = t('chat.replyGone');
+  }
+  q.append(who, text);
+  return q;
+}
+
+/** Bring a message into view and make it flash, so the eye finds it. */
+function jumpTo(id) {
+  const target = [...ui.chatLog.children].find((el) => el.dataset.id === id);
+  if (!target) return;
+  target.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  target.classList.remove('flash');
+  void target.offsetWidth; // restart the animation if it is already running
+  target.classList.add('flash');
+  setTimeout(() => target.classList.remove('flash'), 1300);
+}
+
+/**
+ * Swipe a message to the right to answer it.
+ *
+ * Only a finger's gesture, only sideways, only to the right: anything more vertical is the
+ * conversation scrolling, which the sheet handles. The message follows the finger with a reply
+ * arrow coming in behind it; past the point where letting go will answer it there is a tick,
+ * and going past that point is resisted. On letting go it springs back either way, and the
+ * click a released swipe would otherwise send to a photo is swallowed.
+ */
+const REPLY_AT = 64;
+
+function onSwipeReply(row, reply) {
+  let start = null;
+  let active = false;
+  let armed = false;
+  let swallow = false;
+
+  row.addEventListener('pointerdown', (e) => {
+    swallow = false;
+    if (e.pointerType === 'mouse' || e.target.closest?.('button:not(.bubble-quote), a, input, .audio-track')) return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    active = false;
+    armed = false;
+  });
+
+  row.addEventListener('pointermove', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const mx = e.clientX - start.x;
+    const my = e.clientY - start.y;
+    if (!active) {
+      if (Math.hypot(mx, my) < 10) return;
+      if (mx > 0 && Math.abs(mx) > Math.abs(my) * 1.3) {
+        active = true;
+        try {
+          row.setPointerCapture(e.pointerId);
+        } catch {
+          /* the finger already lifted */
+        }
+        row.classList.add('swiping');
+        row.classList.remove('pressing');
+      } else {
+        start = null; // somebody else's gesture
+        return;
+      }
+    }
+    const dx = Math.max(0, mx);
+    const shown = dx <= REPLY_AT ? dx : REPLY_AT + (dx - REPLY_AT) * 0.3;
+    row.style.translate = `${shown.toFixed(1)}px 0`;
+    row.style.setProperty('--reply', Math.min(1, dx / REPLY_AT).toFixed(3));
+    if (!armed && dx >= REPLY_AT) {
+      armed = true;
+      navigator.vibrate?.(10);
+    } else if (armed && dx < REPLY_AT) {
+      armed = false;
+    }
+    if (e.cancelable) e.preventDefault();
+  });
+
+  const end = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const answered = active && armed;
+    const moved = active;
+    start = null;
+    active = false;
+    if (!moved) return;
+    swallow = true;
+    row.classList.remove('swiping');
+    row.style.removeProperty('translate');
+    row.style.removeProperty('--reply');
+    if (answered) reply();
+  };
+  row.addEventListener('pointerup', end);
+  row.addEventListener('pointercancel', end);
+  row.addEventListener(
+    'click',
+    (e) => {
+      if (!swallow) return;
+      swallow = false;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    },
+    true,
+  );
+
+  const cue = document.createElement('span');
+  cue.className = 'reply-cue';
+  cue.setAttribute('aria-hidden', 'true');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#i-reply');
+  svg.append(use);
+  cue.append(svg);
+  row.prepend(cue);
 }
 
 /**
@@ -5116,6 +5399,7 @@ async function openChat(peerId) {
   const entry = currentEntry(peerId);
   if (!entry) return;
   chatPeerId = peerId;
+  cancelReply();
   ui.chatWho.textContent = entry.name;
   ui.chatInput.value = '';
   ui.chatInput.style.height = '';
@@ -5140,6 +5424,9 @@ async function sendChat() {
   const conn = app.conns.get(chatPeerId);
   const body = ui.chatInput.value.trim();
   if (!body) return;
+  // What this answers, if anything. Taken now and cleared, so it answers exactly one message.
+  const re = replyTo?.id || '';
+  cancelReply();
 
   /*
    * Nowhere to send it right now, and somewhere to send it later.
@@ -5155,7 +5442,7 @@ async function sendChat() {
     if (!conn && !chat.isDurable(chatPeerId)) return;
     ui.chatInput.value = '';
     ui.chatInput.style.height = '';
-    const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true, id: chat.newId() });
+    const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true, id: chat.newId(), re });
     renderChat(held.messages, { locked: held.locked, ephemeral: held.ephemeral });
     paintChatState();
     return;
@@ -5168,10 +5455,10 @@ async function sendChat() {
   // Named now, so both sides store it under the same id and either can delete it later.
   const id = chat.newId();
   try {
-    await conn.transfers.sendText(body, id);
+    await conn.transfers.sendText(body, id, re);
   } catch (err) {
     if (linkDown(err)) {
-      const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true, id });
+      const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true, id, re });
       renderChat(held.messages, { locked: held.locked, ephemeral: held.ephemeral });
       paintChatState();
       return;
@@ -5183,7 +5470,7 @@ async function sendChat() {
     return;
   }
 
-  const { messages, locked, ephemeral } = await chat.append(chatPeerId, { dir: 'out', text: body, id });
+  const { messages, locked, ephemeral } = await chat.append(chatPeerId, { dir: 'out', text: body, id, re });
   renderChat(messages, { locked, ephemeral });
 }
 
@@ -5214,7 +5501,7 @@ async function flushOutbox(conn) {
   for (const m of waiting) {
     if (conn.closed || !m.text) break;
     try {
-      await conn.transfers.sendText(m.text, m.id);
+      await conn.transfers.sendText(m.text, m.id, m.re);
       sent.push(m.id);
     } catch {
       break;
@@ -5490,8 +5777,8 @@ async function keepChatMedia(conn, result, entry, { voice = false, dur = 0, tran
  * peer, it is redrawn; otherwise the conversation is brought up, which is what the old
  * one-shot dialog did and is still the right answer for something that just arrived.
  */
-async function onChatText(conn, { body, mid }) {
-  const { messages, locked, ephemeral } = await chat.append(conn.id, { dir: 'in', text: body, id: mid });
+async function onChatText(conn, { body, mid, re }) {
+  const { messages, locked, ephemeral } = await chat.append(conn.id, { dir: 'in', text: body, id: mid, re });
 
   if (ui.chatDialog.open && chatPeerId === conn.id) {
     renderChat(messages, { locked, ephemeral });
@@ -6058,6 +6345,30 @@ function bindUi() {
   ui.sasBad.addEventListener('click', () => resolveVerify(false));
   ui.verify.addEventListener('cancel', (e) => {
     e.preventDefault(); // a verification must be answered, not dismissed
+  });
+
+  /*
+   * A drag down the conversation puts the keyboard away, as in every messaging app.
+   *
+   * Listened for on the sheet, not the list: once a drag starts, the sheet's own gesture
+   * captures the finger, and the moves stop reaching the list at all.
+   */
+  {
+    let from = null;
+    ui.chatDialog.addEventListener('pointerdown', (e) => {
+      from = e.pointerType !== 'mouse' && ui.chatLog.contains(e.target) ? e.clientY : null;
+    });
+    ui.chatDialog.addEventListener('pointermove', (e) => {
+      if (from === null || document.activeElement !== ui.chatInput) return;
+      if (e.clientY - from > 28) {
+        ui.chatInput.blur();
+        from = null;
+      }
+    });
+  }
+  ui.chatReplyCancel.addEventListener('click', () => {
+    cancelReply();
+    ui.chatInput.focus();
   });
 
   ui.chatComposer.addEventListener('submit', (e) => {

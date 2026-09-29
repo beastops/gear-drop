@@ -295,7 +295,7 @@ export function append(peerId, message) {
   return serialise(peerId, () => appendNow(peerId, message));
 }
 
-async function appendNow(peerId, { dir, text, media, pending = false, id = null }) {
+async function appendNow(peerId, { dir, text, media, pending = false, id = null, re = null }) {
   // A picture or a recording is a message with no words in it, so "nothing to add" has two
   // shapes.
   if (!peerId || (!text && !media)) return { messages: [], locked: false };
@@ -318,6 +318,9 @@ async function appendNow(peerId, { dir, text, media, pending = false, id = null 
    * history and what lets the log show the difference between sent and waiting.
    */
   if (pending) msg.pending = true;
+  // What this answers, by id only: the quote is looked up from this side's own copy when it is
+  // drawn, so a reply never holds a second copy of somebody's words.
+  if (isMessageId(re)) msg.re = re;
 
   /*
    * What is stored about an attachment, and what is not.
