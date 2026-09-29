@@ -1,8 +1,7 @@
 /**
  * The app on a phone, shaped and moving like an iPhone app.
  *
- * The main screen gets a large title under the toolbar, and devices that spring in and give
- * under a finger. A sheet coming up pushes the screen back into a dark rounded card behind it,
+ * The main screen keeps its small toolbar, and devices spring in and give under a finger. A sheet coming up pushes the screen back into a dark rounded card behind it,
  * the way every iOS sheet does. The conversation is a page pushed in from the right, with the
  * screen behind it sliding a little to the left, and it goes back the way an iPhone page goes
  * back: a drag from its left edge that follows the finger, or the back chevron. A pushed page
@@ -45,11 +44,14 @@ function block(marker) {
   throw new Error('does not close');
 }
 
-test('the main screen has a large title, on a phone', () => {
+test('the main screen keeps its small toolbar on a phone, with no large title under it', () => {
   const phone = block('/* iPhone */');
   assert.match(phone, /^@media \(max-width: 560px\)/);
-  assert.match(phone, /\.brand-name\s*\{[^}]*font-size:\s*34px/);
-  assert.match(phone, /\.topbar \.brand\s*\{[^}]*flex-basis:\s*100%/);
+  // A big "Gear Drop" across the top of a phone read as a banner, not a title: the toolbar keeps
+  // its small gear, and the name stays hidden there as the phone layout has always had it.
+  assert.doesNotMatch(phone, /\.brand-name\s*\{/);
+  assert.doesNotMatch(phone, /\.brand-mark\s*\{[^}]*display:\s*none/);
+  assert.doesNotMatch(phone, /\.topbar \.brand\s*\{[^}]*flex-basis/);
 });
 
 test('a sheet pushes the screen back into a card, and the conversation pushes in from the side', () => {

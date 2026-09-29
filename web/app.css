@@ -5401,8 +5401,9 @@ dialog.confirm::backdrop { background: transparent; }
 /*
  * The main screen, and how the screens move, on a phone.
  *
- * A large title under the toolbar, as an iOS app's first screen has. Devices spring in with a
- * little overshoot and give under a finger. A sheet coming up pushes the screen back into a dark
+ * The toolbar stays the small one, the gear and its buttons: a large title across the top read
+ * as a banner, not as the name of the screen. Devices spring in with a little overshoot and give
+ * under a finger. A sheet coming up pushes the screen back into a dark
  * rounded card behind it; the conversation is a page pushed in from the right, with the screen
  * behind sliding a quarter of the way left, and a drag from its left edge takes it back with the
  * screen following the finger. The black the card sits on is the page's own background, set here
@@ -5450,26 +5451,6 @@ dialog.confirm::backdrop { background: transparent; }
   #chat-dialog .chat-sheet { box-shadow: -10px 0 28px rgb(0 0 0 / 0.35); }
   #chat-dialog::backdrop { background: rgb(0 0 0 / calc(0.3 * (1 - var(--push, 0)))); }
 
-  /* A large title under the toolbar. */
-  .topbar {
-    flex-wrap: wrap;
-    row-gap: 0;
-    padding-bottom: 0;
-  }
-  .topbar .actions { order: 1; margin-left: auto; }
-  .topbar .brand {
-    order: 2;
-    flex-basis: 100%;
-    padding: 0 8px 4px;
-  }
-  .brand-mark { display: none; }
-  .brand-name {
-    display: block;
-    font-size: 34px;
-    font-weight: 700;
-    letter-spacing: 0.01em;
-    line-height: 1.15;
-  }
   /* A toolbar button dims under a finger and comes back, as an iOS bar button does. */
   .topbar .icon-btn:active { opacity: 0.45; transform: scale(0.94); }
   .topbar .icon-btn { transition: opacity 180ms ease, transform var(--spring-snap); }
