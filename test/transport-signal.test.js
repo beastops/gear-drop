@@ -207,3 +207,21 @@ test('a transport with nothing open stops claiming it is carrying traffic', asyn
   assert.equal(lane.ready, false, 'the lane is still marked ready');
   assert.equal(session.transportLive, false, 'a transport with no open lane still claims to be live');
 });
+
+test('a closed transport answers nothing, and builds nothing', async () => {
+  // A link stood down in favour of another still answered offers on its session, making a peer
+  // connection nothing listened to and marking the session live, so it ignored fresh handshakes.
+  const session = fakeSession();
+  session.lane = 1; // the answerer
+  const t = new Transport(session, {});
+  t.close();
+  FakePC.made = 0;
+  session.dispatchEvent(new CustomEvent('message', { detail: { t: 'offer', gen: 0, lane: 0, sdp: OFFER } }));
+  await settle();
+  assert.equal(FakePC.made, 0);
+  assert.deepEqual(session.sent, []);
+  // And closing twice does not undo what a newer transport set on the session.
+  session.transportLive = true;
+  t.close();
+  assert.equal(session.transportLive, true);
+});

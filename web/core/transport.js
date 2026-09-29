@@ -49,11 +49,11 @@ export class Transport extends EventTarget {
     this.gen = session.generation || 0;
 
     this._pending = new Map(); // lane -> queued remote candidates
-    session.addEventListener('message', (e) =>
+    this._onMessage = (e) =>
       this._onSignal(e.detail).catch((err) =>
         this.dispatchEvent(new CustomEvent('degraded', { detail: { lane: 0, state: String(err?.message || err) } })),
-      ),
-    );
+      );
+    session.addEventListener('message', this._onMessage);
   }
 
   /* ------------------------------------------------------------ lifecycle */
@@ -73,7 +73,13 @@ export class Transport extends EventTarget {
   }
 
   close() {
+    // Once. A second close cleared `transportLive` again, under whatever transport had taken
+    // this one's place on the session since.
+    if (this.closed) return;
     this.session.transportLive = false;
+    // And deaf from here: a closed transport still answered offers on the session, building a
+    // peer connection nothing listened to.
+    this.session.removeEventListener?.('message', this._onMessage);
 
     this.closed = true;
     for (const lane of this.lanes) {
@@ -197,7 +203,7 @@ export class Transport extends EventTarget {
    * are one short message from anybody sharing a room code.
    */
   async _onSignal(msg) {
-    if (!msg || typeof msg !== 'object') return;
+    if (this.closed || !msg || typeof msg !== 'object') return;
     // A message from an older connection generation describes a peer connection that no
     // longer exists; applying it makes ICE succeed against a dead endpoint and DTLS hang.
     if ((msg.gen ?? 0) !== this.gen) return;
@@ -209,6 +215,7 @@ export class Transport extends EventTarget {
     if (msg.t === 'offer') {
       if (typeof msg.sdp !== 'string' || msg.sdp.length > MAX_SDP) return;
       if (!this.lanes[idx]) await this._makeLane(idx, idx === 0);
+      if (this.closed || !this.lanes[idx]) return; // closed while that was being built
       const { pc } = this.lanes[idx];
       await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
       await this._flushCandidates(idx);

@@ -289,16 +289,23 @@ function body(name) {
   throw new Error(`${name} does not close`);
 }
 
-test('what a blip held back is sent when the link is back, not only when a new one opens', () => {
+test('what is owed is sent after the settle, in order, and again when a lane comes back', () => {
   /*
-   * A relayed conversation outlives a second without its socket, and a direct one a lane that
-   * drops and comes back: neither fires a new 'open', which was the only thing that sent the
-   * outbox, the reactions and the deletes. A message sent in that second stayed "waiting" while
-   * newer ones went straight past it.
+   * A direct conversation outlives a lane that drops and comes back without a new 'open', which
+   * was the only thing that sent the outbox, the reactions and the deletes.
+   *
+   * Not on the relay socket coming back: a relayed conversation does not outlive its socket -
+   * it closes and keys again, and its new 'open' sends everything. Sending on 'online' pushed the
+   * outbox into the old key, which the other side had already dropped.
    */
-  assert.match(MAIN, /app\.signal\.addEventListener\('state', \(e\) => \{\s*if \(e\.detail === 'online'\)/);
+  assert.doesNotMatch(MAIN, /app\.signal\.addEventListener\('state', \(e\) => \{\s*if \(e\.detail === 'online'\)/);
   const lane = MAIN.slice(MAIN.indexOf("transport.addEventListener('lane-open'"), MAIN.indexOf("transport.addEventListener('degraded'"));
   assert.match(lane, /sendOwed\(conn\)/);
+  // Our name and the request to continue go after the settle too: sent the instant this side
+  // opened, they were lost often enough to leave a transfer stuck and a device named "New device".
+  const open = MAIN.slice(MAIN.indexOf("transport.addEventListener('open', () => {"), MAIN.indexOf("transport.addEventListener('path'"));
+  assert.doesNotMatch(open, /resumeAll\(\)|t: 'rename'/);
+  assert.match(open, /sendOwed\(conn, \{ opened: true \}\)/);
 
   const owed = body('sendOwed');
   assert.match(owed, /FLUSH_SETTLE_MS/);
@@ -331,7 +338,8 @@ test('a picture or recording deleted while still on its way is stopped on both s
   assert.match(wipe, /stopChatTransfers\(conn\)/, 'an erased conversation still receives what was on its way');
   assert.match(body('destroyConversation'), /stopChatTransfers\(/);
   // Stopping it for that reason is not news on either screen.
-  assert.match(MAIN, /transfers\.addEventListener\('aborted', \(e\) => \{\s*finishTransfer\(conn, e\.detail\?\.reason === 'unsent' \? '' : 'toast\.cancelled', 'bad'\);/);
+  const aborted = MAIN.slice(MAIN.indexOf("transfers.addEventListener('aborted', (e) => {"), MAIN.indexOf("transfers.addEventListener('error'"));
+  assert.match(aborted, /finishTransfer\(conn, e\.detail\?\.reason === 'unsent' \? '' :/);
 });
 
 test('an outgoing job knows it belongs to a conversation', async () => {

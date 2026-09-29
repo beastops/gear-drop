@@ -49,7 +49,7 @@ function sideOf(hub) {
   return {
     connected: true,
     bufferedAmount: 0,
-    addEventListener: (_n, fn) => listeners.push(fn),
+    addEventListener: (name, fn) => name === 'frame' && listeners.push(fn),
     removeEventListener: () => {},
     forward: (tag, bytes) => hub.forward(tag, bytes),
     dispatch: (detail) => listeners.forEach((fn) => fn({ detail })),
@@ -153,4 +153,26 @@ test('padding reaches the wire and never reaches the engine', async () => {
   await new Promise((r) => setTimeout(r, 900));
   assert.ok(hub.wire.length > afterData, 'nothing was padded, so the byte count is still the answer');
   assert.equal(chunks, 1, 'padding was delivered to the transfer engine as if it were data');
+});
+
+test('a relayed connection ends when this device loses its socket, so both sides key again', async () => {
+  /*
+   * The other device is told this one left the moment the socket goes, and resets. This side
+   * kept its session "live" and ignored every fresh handshake after reconnecting: it showed the
+   * device as connected, sent into a key nobody held any more, and never met it again until a
+   * reload.
+   */
+  const signal = new EventTarget();
+  Object.assign(signal, { connected: true, bufferedAmount: 0, forward() {} });
+  const session = { signal, tag: new Uint8Array(16), tagKey: 'tag', K: new Uint8Array(32), transportLive: false, computeSas: async () => {} };
+  const relay = new RelayTransport(session);
+  await relay.start();
+  assert.equal(session.transportLive, true);
+  let closed = 0;
+  relay.addEventListener('closed', () => closed++);
+
+  signal.dispatchEvent(new CustomEvent('state', { detail: 'connecting' }));
+  assert.equal(relay.closed, true, 'still counted as live after the socket went');
+  assert.equal(session.transportLive, false);
+  assert.equal(closed, 1);
 });

@@ -56,6 +56,8 @@ const HEARD_MAX = 8;
  * same reason.
  */
 const SPENT_MAX = 8;
+/** Sealed frames held while a confirmation is checked; a handful is all a real peer sends. */
+const EARLY_MAX = 16;
 
 /** Minimum gap between two re-keys, so the detector cannot be driven in a loop. */
 const REKEY_MIN_MS = 4000;
@@ -120,6 +122,7 @@ export class SecureSession extends EventTarget {
      */
     this._candidate = null;
     this._earlyConfirm = null; // a confirmation that arrived before we had a candidate
+    this._early = []; // sealed frames that arrived with it, opened once it is confirmed
     /*
      * Our lattice keypair, generated alongside the CPace share and thrown away with it.
      *
@@ -238,6 +241,7 @@ export class SecureSession extends EventTarget {
     if (this._candidate?.K) this._candidate.K.fill(0);
     this._candidate = null;
     this._earlyConfirm = null;
+    this._early = [];
   }
 
   /** Remember what a round was waiting for, now that the round is over. */
@@ -427,8 +431,35 @@ export class SecureSession extends EventTarget {
     }
 
     if (type === F_SEALED) {
-      if (!this.established) return; // never process ciphertext before a key exists
+      if (!this.established) {
+        /*
+         * Never processed before a key is confirmed - but held, not dropped, while a
+         * confirmation is being worked through.
+         *
+         * The side that confirms first speaks at once, and its first frame arrives back to back
+         * with its confirmation, while this side is still checking it. Dropped, that frame was
+         * the relay request, the direct link's offer or the request to continue a transfer, and
+         * each was lost for good. Held here it is opened, like any other, only once the key is
+         * confirmed, and a frame that does not open then is dropped as it always was.
+         */
+        if ((this._candidate || this._earlyConfirm) && this._early.length < EARLY_MAX) {
+          this._early.push(Uint8Array.from(body));
+        }
+        return;
+      }
       const msg = await this._unseal(body);
+      if (msg) this.dispatchEvent(new CustomEvent('message', { detail: msg }));
+    }
+  }
+
+  /** Open what arrived while the confirmation was being checked, now that it has been. */
+  async _openEarly() {
+    const held = this._early;
+    this._early = [];
+    for (const body of held) {
+      if (!this.established) return;
+      // Quietly: a held frame that does not open says nothing about the new key.
+      const msg = await this._unseal(body, { quiet: true });
       if (msg) this.dispatchEvent(new CustomEvent('message', { detail: msg }));
     }
   }
@@ -706,6 +737,8 @@ export class SecureSession extends EventTarget {
     this._forgetEphemerals();
 
     this.dispatchEvent(new CustomEvent('secure', { detail: { lane: this.lane } }));
+    // After 'secure', so whatever that builds is already listening.
+    if (this._early.length) this._openEarly().catch(() => {});
   }
 
   /**
@@ -779,7 +812,7 @@ export class SecureSession extends EventTarget {
    *
    * A replay window is authenticated state. Only an authenticated frame may move it.
    */
-  async _unseal(body) {
+  async _unseal(body, { quiet = false } = {}) {
     if (body.length < 8) return null;
     const counter = Number(new DataView(body.buffer, body.byteOffset, 8).getBigUint64(0, true));
     // Past 2^53 a counter is no longer exactly representable, so it cannot be one a sender
@@ -792,7 +825,7 @@ export class SecureSession extends EventTarget {
     } catch {
       // Noise, or somebody trying. Neither earns a state change or a banner. A wrong code is
       // caught at confirmation.
-      this._maybeDiverged();
+      if (!quiet) this._maybeDiverged();
       return null;
     }
     // It opened, so the two sides agree and whatever came before was noise.

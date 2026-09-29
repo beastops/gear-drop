@@ -109,3 +109,32 @@ test('an offer whose manifest never went leaves nothing behind to go stale', asy
   await assert.rejects(tm.offer([new File([new Uint8Array(3)], 'a.bin')]), /control path is not open/);
   assert.equal(tm.out.size, 0, 'a job was left behind for an offer that never went');
 });
+
+test('a transfer waiting to resume is kept, and an abandoned direct attempt is closed', () => {
+  const MAIN_ = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'main.js'), 'utf8');
+  /*
+   * The dead-link timer dropped the connection four seconds after the link went, whatever it
+   * was carrying: a transfer the departure handler had kept for resuming was thrown away and
+   * started again from nothing. Kept now, and keyed again, so it resumes.
+   */
+  const dead = MAIN_.slice(MAIN_.indexOf('conn.deadTimer = setTimeout(() => {'), MAIN_.indexOf('}, DEAD_AFTER_MS);'));
+  assert.match(dead, /if \(hasUnfinishedWork\(conn\)\) \{[\s\S]*conn\.session\.reset\(\);[\s\S]*return;[\s\S]*\}[\s\S]*dropConn\(conn\.id\)/);
+  // The WebRTC attempt set aside for the relay is closed when the connection goes.
+  assert.match(MAIN_.slice(MAIN_.indexOf('function dropConn('), MAIN_.indexOf('function dropConn(') + 900), /closeRtc\(conn\)/);
+});
+
+test('a connection parked for a device that came back elsewhere gives way to it', () => {
+  /*
+   * Parked for resuming, it made every later session from that device stand down. A device that
+   * reloaded, or came back in a later epoch, never keys on the parked session again, so the two
+   * never connected until a reload. The newcomer now takes over if the parked one has not come
+   * back on its own session within the fallback time.
+   */
+  const MAIN_ = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'main.js'), 'utf8');
+  assert.match(MAIN_, /const onSecure = async \(\) => \{/);
+  assert.match(MAIN_, /session\.addEventListener\('secure', onSecure\)/);
+  const late = MAIN_.slice(MAIN_.indexOf('if (existing && existing.session !== session) {'), MAIN_.indexOf('const transfers = new TransferManager({ transport, session });'));
+  assert.match(late, /if \(existing\.state === 'ready'\) \{/);
+  assert.match(late, /existing\.takeover = setTimeout\([\s\S]*dropConn\(existing\.id[\s\S]*onSecure\(\)[\s\S]*FALLBACK_AFTER_MS\)/);
+  assert.match(MAIN_.slice(MAIN_.indexOf('function dropConn('), MAIN_.indexOf('function dropConn(') + 900), /clearTimeout\(conn\.takeover\)/);
+});

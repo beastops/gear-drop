@@ -380,10 +380,6 @@ async function boot() {
    */
   app.signal.addEventListener('state', paintLinkState);
   app.signal.addEventListener('network', onNetworkLabel);
-  // Back after a blip: whatever a relayed conversation held back in the meantime goes now.
-  app.signal.addEventListener('state', (e) => {
-    if (e.detail === 'online') for (const conn of app.conns.values()) sendOwed(conn);
-  });
   app.signal.connect();
 
   app.radar = new Radar(ui.radar, { originEl: ui.beacon });
@@ -912,7 +908,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
     else console.info('Gear Drop: session not keyed —', e.detail?.message || 'unknown');
   });
 
-  session.addEventListener('secure', async () => {
+  const onSecure = async () => {
     const existing = own() || app.conns.get(connId);
     /*
      * A conversation a pairing adopted, keying again on the channel or code session it was met
@@ -999,6 +995,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
       } catch {
         /* already gone */
       }
+      closeRtc(existing);
       await existing.transfers.attachTransport(transport);
       existing.transport = transport;
       existing.usingRelay = !wantDirect;
@@ -1021,8 +1018,26 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
     // The one that got there first owns the conversation; a latecomer stands down rather
     // than replacing a connection that may be carrying a transfer.
     if (existing && existing.session !== session) {
-      if (existing.state === 'ready' || hasUnfinishedWork(existing)) {
+      if (existing.state === 'ready') {
         transport.close();
+        return;
+      }
+      if (hasUnfinishedWork(existing)) {
+        transport.close();
+        /*
+         * Parked, waiting for the other device on the session it was on. This one keying says
+         * the device is back - just not there: it reloaded, or came back into a later epoch and
+         * never listened on the old tag, so the parked one would wait for ever and every later
+         * session would stand down in front of it. It gets the fallback time to key again on
+         * its own session; if it has not, what it was holding is not coming back, and the
+         * conversation starts over on this one.
+         */
+        clearTimeout(existing.takeover);
+        existing.takeover = setTimeout(() => {
+          if (app.conns.get(existing.id) !== existing || existing.session.established || !session.established) return;
+          dropConn(existing.id, { silent: true });
+          onSecure();
+        }, FALLBACK_AFTER_MS);
         return;
       }
       dropConn(connId, { silent: true });
@@ -1059,7 +1074,8 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
       if (!member) toast(t('toast.openFailed'), 'bad');
       dropConn(conn.id);
     }
-  });
+  };
+  session.addEventListener('secure', onSecure);
 
   session.addEventListener('message', (e) => {
     const conn = own();
@@ -1144,6 +1160,10 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
       } catch {
         /* already closing */
       }
+      // Parked for the re-key; the dead-link timer must not drop it in the meantime.
+      clearTimeout(conn.deadTimer);
+      conn.deadTimer = 0;
+      closeRtc(conn);
       conn.state = 'connecting';
       conn.progress = null;
       render();
@@ -1269,12 +1289,18 @@ async function useRelay(conn, why) {
 
   // If the direct path completes later, take it: it is faster, and the relay stops seeing
   // even ciphertext.
-  conn.rtc?.addEventListener('open', async () => {
-    if (conn.closed || !conn.usingRelay) return;
+  // This attempt only: one set aside in an earlier round must not swap itself in later.
+  const rtc = conn.rtc;
+  rtc?.addEventListener('open', async () => {
+    if (conn.closed || !conn.usingRelay || conn.rtc !== rtc) return;
     conn.usingRelay = false;
-    conn.transport = conn.rtc;
-    await conn.transfers.attachTransport(conn.rtc);
+    conn.transport = rtc;
+    conn.rtc = null;
+    await conn.transfers.attachTransport(rtc);
     relay.close();
+    // A transfer under way stopped with the relay; the receiver's report of where it got to is
+    // what starts it again on this path.
+    conn.transfers.resumeAll().catch(() => {});
     toast(t('toast.direct', { name: conn.name }), 'good');
     render();
   });
@@ -1291,23 +1317,32 @@ async function useRelay(conn, why) {
  * into that second was kept and would otherwise wait for the next connection while newer
  * messages went past it.
  */
-function sendOwed(conn) {
-  if (conn.owing) return;
-  conn.owing = true;
+function sendOwed(conn, { opened = false } = {}) {
+  // Two of these overlapping is harmless: every frame they send is one the other side takes
+  // once however often it arrives.
   setTimeout(async () => {
-    try {
-      if (conn.closed || conn.state !== 'ready') return;
-      flushWaitingSends(conn).catch(() => {});
-      // In this order: an erase before what was written since, which it must not take with it,
-      // and a reaction after the message it is on.
-      await flushWipePending(conn).catch(() => {});
-      await flushOutbox(conn).catch(() => {});
-      if (conn.closed) return;
-      flushUnsendPending(conn).catch(() => {});
-      flushReactions(conn).catch(() => {});
-    } finally {
-      conn.owing = false;
+    if (conn.closed || conn.state !== 'ready') return;
+    const { transfers } = conn;
+    if (opened) transfers._sendCtl({ t: 'rename', name: app.name }).catch(() => {});
+    // A cancel made while the link was down, before anything else goes down it.
+    await transfers.flushOwed().catch(() => {});
+    if (opened) {
+      // Anything that was in flight when the link dropped continues from where it stopped.
+      transfers
+        .resumeAll()
+        .then((n) => {
+          if (n) toast(n === 1 ? t('toast.resume.one') : t('toast.resume.many', { n }), 'good');
+        })
+        .catch(() => {});
     }
+    flushWaitingSends(conn).catch(() => {});
+    // In this order: an erase before what was written since, which it must not take with it,
+    // and a reaction after the message it is on.
+    await flushWipePending(conn).catch(() => {});
+    await flushOutbox(conn).catch(() => {});
+    if (conn.closed) return;
+    flushUnsendPending(conn).catch(() => {});
+    flushReactions(conn).catch(() => {});
   }, FLUSH_SETTLE_MS);
 }
 
@@ -1319,9 +1354,10 @@ function wireTransport(conn, only) {
     if (conn.transport !== transport) return; // a superseded path
     clearTimeout(conn.fallbackTimer);
     conn.state = 'ready';
-    transfers._sendCtl({ t: 'rename', name: app.name }).catch(() => {});
-    // Anything this device was still owed is sent the moment it is reachable again.
-    sendOwed(conn);
+    // Our name, anything this device was still owed, and a request to continue whatever was in
+    // flight - all after the settle, since a frame sent the instant this side opens can land
+    // before the other side is listening. A lost request to continue left a transfer stuck.
+    sendOwed(conn, { opened: true });
     app.radar.burst();
     render();
     if (conn.sas && !conn.verified && !conn.member) promptVerify(conn);
@@ -1339,14 +1375,18 @@ function wireTransport(conn, only) {
      */
     notify(conn.name, t('toast.connectedBody'));
     toast(t('toast.connectedBody'), 'good', { title: conn.name, icon: iconForConn(conn) });
+  });
 
-    // Anything that was in flight when the link dropped continues from where it stopped.
-    transfers
-      .resumeAll()
-      .then((n) => {
-        if (n) toast(n === 1 ? t('toast.resume.one') : t('toast.resume.many', { n }), 'good');
-      })
-      .catch(() => {});
+  /*
+   * The path closed under a connection still counted as ready - a relayed one whose socket went.
+   * It is not ready any more, and saying so is what stops a message being offered to it; the
+   * handshake that follows brings it back.
+   */
+  transport.addEventListener('closed', () => {
+    if (conn.transport !== transport || conn.closed || conn.state !== 'ready') return;
+    conn.state = 'connecting';
+    render();
+    if (ui.chatDialog.open && chatPeerId === conn.id) paintChatState();
   });
 
   transport.addEventListener('path', (e) => {
@@ -1421,6 +1461,18 @@ function wireTransport(conn, only) {
        * immediately stops working.
        */
       if (app.conns.get(conn.id) !== conn) return;
+      /*
+       * Carrying something: kept, and keyed again, so the transfer resumes where it stopped -
+       * which is what the departure handler keeps it for. Dropped here, it started over from
+       * nothing. A fresh share from this side is what the other device keys against.
+       */
+      if (hasUnfinishedWork(conn)) {
+        conn.state = 'connecting';
+        conn.progress = null;
+        render();
+        conn.session.reset();
+        return;
+      }
       dropConn(conn.id);
       // Listening again is what lets the peer's next attempt land without a sweep to wait for.
       resubscribePaired().catch(() => {});
@@ -1523,7 +1575,10 @@ function wireTransfers(conn) {
   transfers.addEventListener('sent', () => finishTransfer(conn, 'xfer.sent'));
   transfers.addEventListener('declined', () => finishTransfer(conn, 'xfer.declined', 'bad'));
   transfers.addEventListener('aborted', (e) => {
-    finishTransfer(conn, e.detail?.reason === 'unsent' ? '' : 'toast.cancelled', 'bad');
+    // Ended by a failure on the other side, or by it no longer having the file: a failure, and
+    // said as one. Stopped because its message was deleted: not news on either screen.
+    const failed = e.detail?.reason === 'failed' || e.detail?.reason === 'gone';
+    finishTransfer(conn, e.detail?.reason === 'unsent' ? '' : failed ? 'xfer.failed' : 'toast.cancelled', 'bad');
     runQueuedAccepts();
   });
   transfers.addEventListener('error', (e) => {
@@ -1670,6 +1725,24 @@ function hasUnfinishedWork(conn) {
  */
 const DEAD_AFTER_MS = 4000;
 
+/**
+ * Close the WebRTC attempt set aside when a connection moved to the relay.
+ *
+ * Kept in case it came good later; never closed, it stayed reachable from the session for as
+ * long as the session lived, one more peer connection per fallback, and when its ICE finally
+ * gave up it marked the session's live relay as down.
+ */
+function closeRtc(conn) {
+  if (conn.rtc && conn.rtc !== conn.transport) {
+    try {
+      conn.rtc.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  conn.rtc = null;
+}
+
 function dropConn(connId, { silent = false } = {}) {
   const conn = app.conns.get(connId);
   if (!conn) return;
@@ -1678,9 +1751,11 @@ function dropConn(connId, { silent = false } = {}) {
   } catch {
     /* already closing */
   }
+  closeRtc(conn);
   conn.closed = true;
   clearTimeout(conn.fallbackTimer);
   clearTimeout(conn.deadTimer);
+  clearTimeout(conn.takeover);
   clearTimeout(conn.typingTimer);
   conn.typing = 0;
   app.conns.delete(connId);

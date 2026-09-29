@@ -196,6 +196,12 @@ const ATTACH = (() => {
   return MAIN.slice(at, MAIN.indexOf('\n}\n', at));
 })();
 const handler = (event) => {
+  // 'secure' is a named function, so a parked connection's takeover can run it again.
+  if (event === 'secure') {
+    const at = ATTACH.indexOf('const onSecure = async () => {');
+    assert.ok(at > 0, 'no secure handler');
+    return ATTACH.slice(at, ATTACH.indexOf('\n  };', at));
+  }
   const at = ATTACH.indexOf(`session.addEventListener('${event}'`);
   assert.ok(at > 0, `no ${event} handler`);
   return ATTACH.slice(at, ATTACH.indexOf('\n  });', at));

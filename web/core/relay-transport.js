@@ -81,6 +81,18 @@ export class RelayTransport extends EventTarget {
       this._unwrap(buf).catch(() => {});
     };
     this.signal.addEventListener('frame', this._onFrame);
+
+    /*
+     * This path is this device's socket. The moment the socket goes, the server tells the other
+     * device this one left, and it resets; kept open here, the session went on counting as
+     * live, ignored every fresh handshake after the reconnect, showed the device as connected
+     * and sent into a key nobody held any more. Closed, the next announcement keys both sides
+     * again, and the conversation resumes on a new relay.
+     */
+    this._onState = (e) => {
+      if (e.detail !== 'online') this.close();
+    };
+    this.signal.addEventListener('state', this._onState);
   }
 
   async start() {
@@ -121,6 +133,7 @@ export class RelayTransport extends EventTarget {
     // afterwards and start writing to a tag it has left.
     clearTimeout(this._padTimer);
     this.signal.removeEventListener('frame', this._onFrame);
+    this.signal.removeEventListener('state', this._onState);
     this.ctl = null;
     this.dispatchEvent(new CustomEvent('closed'));
   }

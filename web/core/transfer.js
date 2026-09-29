@@ -162,7 +162,21 @@ export class TransferManager extends EventTarget {
     this._keyGen = null;
     this._ctlWindow = new ReplayWindow();
     this._ctl = null;
+    // Cancels that could not be said when they were made, said the moment the link is back.
+    this._owedAborts = new Map(); // transferId -> reason
     this.attachTransport(transport);
+  }
+
+  /** Say whatever could not be said while the link was down. Safe to call at any time. */
+  async flushOwed() {
+    for (const [transferId, reason] of [...this._owedAborts]) {
+      try {
+        await this._sendCtl({ t: 'abort', transferId, reason });
+        this._owedAborts.delete(transferId);
+      } catch {
+        return; // still down; the next call tries again
+      }
+    }
   }
 
   /**
@@ -195,6 +209,14 @@ export class TransferManager extends EventTarget {
       }
     }
 
+    /*
+     * Once per transport. Going to the relay and coming back attaches the direct transport a
+     * second time, and wiring it again ran every chunk after that twice: two decrypts, two
+     * writes, and progress that reached the end half way through.
+     */
+    this._wired ??= new WeakSet();
+    if (this._wired.has(transport)) return;
+    this._wired.add(transport);
     transport.addEventListener('ctl', (e) => this._onCtlFrame(e.detail));
     transport.addEventListener('chunk', (e) => this._onChunk(e.detail));
   }
@@ -204,6 +226,7 @@ export class TransferManager extends EventTarget {
    * side that knows what actually reached the disk.
    */
   async resumeAll() {
+    await this.flushOwed();
     let resumed = 0;
     for (const job of this.in.values()) {
       if (job.state !== 'receiving') continue;
@@ -630,9 +653,25 @@ export class TransferManager extends EventTarget {
       }
     }
     this.dispatchEvent(new CustomEvent('accepted', { detail: { transferId: msg.transferId } }));
-    this._pump(job).catch((err) =>
-      this.dispatchEvent(new CustomEvent('error', { detail: err })),
-    );
+    this._pump(job).catch((err) => this._pumpFailed(job, err));
+  }
+
+  /**
+   * The send loop threw - a file that can no longer be read, most often. The job goes and the
+   * other side is told, rather than the receiver waiting on bytes that will never come and this
+   * side counting a job that will never finish as unfinished work.
+   */
+  _pumpFailed(job, err) {
+    job.pumping = false;
+    job.state = 'aborted';
+    this.out.delete(job.transferId);
+    this._sendCtl({ t: 'abort', transferId: job.transferId, reason: 'failed' }).catch(() => {});
+    this.dispatchEvent(new CustomEvent('error', { detail: err }));
+  }
+
+  /** Whether the send loop for this job should stop: cancelled, failed, or replaced. */
+  _stopped(job) {
+    return job.state === 'aborted' || this.out.get(job.transferId) !== job;
   }
 
   _onDecline(msg) {
@@ -658,7 +697,18 @@ export class TransferManager extends EventTarget {
    */
   async _onResume(msg) {
     const job = this.out.get(msg.transferId);
-    if (!job) return;
+    /*
+     * Asked to continue something this side no longer has - its tab reloaded, or the file was
+     * cancelled here while the link was down. Saying so is the only thing that ends it over
+     * there: otherwise the receiver waits on it for good, and turns away every later offer from
+     * this device as busy.
+     */
+    if (!job) {
+      if (typeof msg.transferId === 'string' && ID_RE.test(msg.transferId)) {
+        this._sendCtl({ t: 'abort', transferId: msg.transferId, reason: 'gone' }).catch(() => {});
+      }
+      return;
+    }
     const entry = outEntry(job, msg.fileId);
     if (!entry) return;
 
@@ -690,9 +740,9 @@ export class TransferManager extends EventTarget {
       if (tries < 40) setTimeout(() => this._kick(job, tries + 1), 120);
       return;
     }
-    if (job.state !== 'sending' || this.transport.closed) return;
+    if (job.state !== 'sending' || this.transport.closed || this._stopped(job)) return;
     job.startedAt = performance.now();
-    this._pump(job).catch((err) => this.dispatchEvent(new CustomEvent('error', { detail: err })));
+    this._pump(job).catch((err) => this._pumpFailed(job, err));
   }
 
   /**
@@ -752,7 +802,20 @@ export class TransferManager extends EventTarget {
       return { frame, bytes: end - offset, entry };
     };
 
+    /*
+     * Cancelled, by either side, or failed: stop here. The loop holds its own reference to the
+     * job, so taking the job out of the map did not stop it - it went on sending the cancelled
+     * file, reported it "Sent", and its leftover chunks, which carry no transfer id, landed in
+     * the next transfer and failed that one too. Checked at every point the loop waits.
+     */
+    const halt = () => {
+      if (!this._stopped(job)) return false;
+      job.pumping = false;
+      return true;
+    };
+
     while (true) {
+      if (halt()) return;
       while (pending.length < READ_AHEAD) {
         const slot = await prepare();
         if (!slot) break;
@@ -761,6 +824,7 @@ export class TransferManager extends EventTarget {
       if (!pending.length) break;
 
       const item = await pending.shift();
+      if (halt()) return;
       let lane = myTransport.pickLane();
       let spins = 0;
       while (lane < 0 || !myTransport.canSend(lane)) {
@@ -768,6 +832,7 @@ export class TransferManager extends EventTarget {
           job.pumping = false; // the link went away; a resume will restart us
           return;
         }
+        if (halt()) return;
         await myTransport.drain(Math.max(lane, 0));
         // drain() may resolve immediately when the transport is blocked for a reason it
         // cannot see; yield for real rather than burning the event loop.
@@ -778,6 +843,7 @@ export class TransferManager extends EventTarget {
         job.pumping = false;
         return;
       }
+      if (halt()) return;
       item.frame[1] = lane;
       myTransport.send(lane, item.frame);
       job.sent += item.bytes;
@@ -792,7 +858,7 @@ export class TransferManager extends EventTarget {
     // Everything is queued; wait for the wire to actually drain before declaring done.
     for (let i = 0; i < myTransport.lanes.length; i++) await myTransport.drain(i);
     job.pumping = false;
-    if (myTransport !== this.transport || myTransport.closed) return;
+    if (myTransport !== this.transport || myTransport.closed || this._stopped(job)) return;
 
     for (const entry of job.entries) {
       if (job.accepted && !job.accepted.has(entry.id)) continue;
@@ -989,29 +1055,41 @@ export class TransferManager extends EventTarget {
     try {
       pt = await plainPromise;
     } catch {
-      // A GCM failure is tampering or a key mismatch, never ordinary corruption:
-      // SCTP already guarantees the integrity of anything it delivers.
-      return this._fail(job, 'chunk failed authentication');
+      /*
+       * Not this transfer's chunk, and dropped rather than failing the transfer.
+       *
+       * A chunk carries no transfer id, so one still in flight from a transfer that was just
+       * cancelled, or sent under the key before a reconnect, arrives here and does not open. It
+       * is never written and never enters the integrity tree. Nothing can inject one either: the
+       * relay's outer seal and DTLS both stand in front of this. A chunk this transfer really
+       * needed is still missing, and the wait for the bytes and the root check at the end are
+       * what catch that.
+       */
+      return;
     }
 
     // The tag goes into the integrity tree only now. Writing it as the frame arrived meant
     // a frame that never authenticated could still overwrite the record of one that had.
     entry.hashes[index] = ct.slice(ct.length - 16); // the GCM tag is the chunk's MAC
 
-    if (offset + pt.length > entry.size) {
+    // The length before the write: a sink that hands the bytes to a worker transfers their
+    // buffer, and read afterwards it is zero - every receive on that path sat at 0% and failed.
+    const len = pt.byteLength;
+    if (offset + len > entry.size) {
       return this._fail(job, `chunk outside the offered size for ${entry.name}`);
     }
 
     await sink.write(offset, pt);
-    job.received += pt.length;
 
     // Track received ranges so lanes may deliver out of order and resume stays exact.
-    addRange(entry.ranges, offset, offset + pt.length);
+    addRange(entry.ranges, offset, offset + len);
     entry.contiguous = contiguous(entry.ranges);
     // Coverage, not arrivals. A resend is byte-identical by design and the resume path
     // produces them deliberately, so counting arrivals would count twice and let a file with
-    // a hole in it look complete.
+    // a hole in it look complete. The job's total follows the same rule.
+    const before = entry.received || 0;
     entry.received = covered(entry.ranges);
+    job.received += entry.received - before;
 
     if (entry.contiguous >= entry.size) entry.resolveComplete?.();
 
@@ -1083,18 +1161,32 @@ export class TransferManager extends EventTarget {
   async _onAbort(msg) {
     const job = this.in.get(msg.transferId) || this.out.get(msg.transferId);
     if (!job) return;
-    for (const sink of job.sinks?.values() || []) await sink.abort();
+    job.state = 'aborted'; // what stops a send loop still running for it
     this.in.delete(msg.transferId);
     this.out.delete(msg.transferId);
+    for (const sink of job.sinks?.values() || []) await sink.abort().catch(() => {});
     this.dispatchEvent(new CustomEvent('aborted', { detail: { transferId: msg.transferId, reason: msg.reason } }));
   }
 
+  /**
+   * Cancel a transfer, from either end.
+   *
+   * Done here whatever the link is doing. It used to go only as far as telling the other side,
+   * and when the link was down - which is when a stuck ring makes somebody tap cancel - that
+   * threw, nothing on screen changed, and the file was delivered once the link came back. Now
+   * the job stops at once, and the other side is told as soon as it can be (`flushOwed`).
+   */
   async abort(transferId, reason = 'user') {
     const job = this.in.get(transferId) || this.out.get(transferId);
-    if (job?.sinks) for (const sink of job.sinks.values()) await sink.abort();
+    if (job) job.state = 'aborted';
     this.in.delete(transferId);
     this.out.delete(transferId);
-    await this._sendCtl({ t: 'abort', transferId, reason });
+    if (job?.sinks) for (const sink of job.sinks.values()) await sink.abort().catch(() => {});
+    try {
+      await this._sendCtl({ t: 'abort', transferId, reason });
+    } catch {
+      this._owedAborts.set(transferId, reason);
+    }
     this.dispatchEvent(new CustomEvent('aborted', { detail: { transferId, reason } }));
   }
 
@@ -1108,8 +1200,18 @@ export class TransferManager extends EventTarget {
     }
   }
 
+  /**
+   * A receive that cannot finish. It is let go - its sinks, and the bytes they hold - and the
+   * sender is told. It used to be only marked: the sender went on to "Sent", and the job, its
+   * sink and whatever was already in memory stayed for the life of the page.
+   */
   _fail(job, why) {
+    if (job.state === 'failed') return; // said once
     job.state = 'failed';
+    for (const sink of job.sinks?.values() || []) sink.abort().catch(() => {});
+    job.sinks?.clear();
+    this.in.delete(job.transferId);
+    this._sendCtl({ t: 'abort', transferId: job.transferId, reason: 'failed' }).catch(() => {});
     this.dispatchEvent(new CustomEvent('error', { detail: new Error(why) }));
   }
 

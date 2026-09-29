@@ -547,3 +547,54 @@ test('a stale confirmation is reported without destroying the agreement', async 
   assert.ok(a.established, 'the stale confirmation took the real agreement with it');
   assert.deepEqual(a.sas, b.sas);
 });
+
+test('the first message sent the moment a session is up is not lost', async () => {
+  /*
+   * The side that confirms first sends at once - the request to use the relay, the direct
+   * link's offer. It reached the other side back to back with the confirmation, while that side
+   * was still working through it and not yet up, and was dropped: a transfer that never resumed,
+   * a direct link that never formed, a five-second wait for the fallback.
+   *
+   * Delivered by hand, so the two frames arrive in the same tick, as one read off a socket would.
+   */
+  const tag = new Uint8Array(16).fill(31);
+  const key = toHex(tag);
+  const queue = { A: [], B: [] };
+  const endpoint = (other) => {
+    const e = new EventTarget();
+    Object.assign(e, { connected: true, subscribe() {}, unsubscribe() {} });
+    e.forward = (_t, payload) => queue[other].push(Uint8Array.from(payload));
+    return e;
+  };
+  const ea = endpoint('B');
+  const eb = endpoint('A');
+  const root = new Uint8Array(32).fill(1);
+  const A = new SecureSession(ea, { tag, code: '', pairRoot: root });
+  const B = new SecureSession(eb, { tag, code: '', pairRoot: root });
+  const heard = [];
+  A.addEventListener('message', (e) => heard.push(e.detail.t));
+  B.addEventListener('secure', () => B.send({ t: 'first' }));
+  const deliver = (to, frames) => {
+    for (const payload of frames) (to === 'A' ? ea : eb).dispatchEvent(new CustomEvent('frame', { detail: { tag, key, payload } }));
+  };
+
+  A.start();
+  B.start();
+  await settle();
+  // The shares cross; then B hears A's confirmation first, is up, and speaks.
+  const toA = queue.A.splice(0);
+  const toB = queue.B.splice(0);
+  deliver('A', toA.filter((f) => f[0] === F_CPACE));
+  deliver('B', toB.filter((f) => f[0] === F_CPACE));
+  await settle();
+  deliver('B', queue.B.splice(0).filter((f) => f[0] === F_CONFIRM));
+  await settle();
+  assert.equal(B.established, true);
+  // B's confirmation and its first message reach A together.
+  deliver('A', queue.A.splice(0).filter((f) => f[0] === F_CONFIRM || f[0] === F_SEALED));
+  await until(() => A.established);
+  await until(() => heard.length, 300);
+  assert.deepEqual(heard, ['first']);
+  A.destroy();
+  B.destroy();
+});

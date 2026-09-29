@@ -215,12 +215,14 @@ class OpfsSink {
   }
 
   async write(offset, bytes) {
+    // Counted first: the worker path transfers the buffer, and afterwards it measures zero.
+    const n = bytes.byteLength;
     if (this.backend.kind === 'writable') {
       await this.backend.writable.write({ type: 'write', position: offset, data: bytes });
     } else {
       await rpc(this.backend.worker, { t: 'write', offset, bytes }, [bytes.buffer]);
     }
-    this.written += bytes.byteLength;
+    this.written += n;
   }
 
   async close() {
