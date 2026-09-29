@@ -80,3 +80,11 @@ test('devices spring in and give under a finger', () => {
   assert.match(phone, /\.peer\s*\{[^}]*animation:[^;]*cubic-bezier\(0\.34, 1\.56/);
   assert.match(phone, /\.peer:active \.avatar\s*\{[^}]*scale:\s*0\.9/);
 });
+
+test('the screen behind does not darken again after a swipe back', () => {
+  // Cleared as the conversation closed, the drag's progress brought the backdrop's shade back
+  // over a screen already fully revealed, for as long as the page took to slide out.
+  const watch = MAIN.slice(MAIN.indexOf('function watchModals()'), MAIN.indexOf('function bindCodeBoxes('));
+  assert.doesNotMatch(watch, /if \(!chatOpen\) document\.body\.style\.removeProperty\('--push'\)/);
+  assert.match(watch, /if \(chatOpen && !chatWas\) document\.body\.style\.removeProperty\('--push'\)/);
+});

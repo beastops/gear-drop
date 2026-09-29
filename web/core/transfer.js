@@ -564,6 +564,8 @@ export class TransferManager extends EventTarget {
       sent: 0,
       startedAt: 0,
       state: 'offered',
+      // Whether it belongs to a conversation, so erasing that conversation can stop it.
+      chat: chat === true,
       key: await this.session.transferKey(transferId),
       chunkSize: this.transport.chunkSize,
     };

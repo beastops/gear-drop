@@ -232,3 +232,113 @@ test('a delete that cannot be delivered now is owed, and cleared only when answe
   // Sent again every time the device connects, after the settle the outbox waits for.
   assert.match(MAIN, /if \(conn\.closed\) return;\n\s+flushUnsendPending\(conn\)/);
 });
+
+/* ─────────────────── never the wrong message ─────────────────── */
+
+test('a message with a shared id is found by that id only, never by what it says', async () => {
+  /*
+   * The other device deleted an "ok" that never got here: it was still waiting to send. Found
+   * by what it said, it matched the "ok" that did arrive earlier, and deleted that one instead.
+   */
+  await chat.clear(PEER);
+  const arrived = chat.newId();
+  await chat.append(PEER, { dir: 'in', text: 'ok', id: arrived });
+  const h = await chat.fingerprint({ text: 'ok' });
+  const found = await chat.resolve(PEER, [{ id: chat.newId(), dir: 'out', at: Date.now(), h }]);
+  assert.deepEqual(found, []);
+  assert.deepEqual((await chat.load(PEER)).messages.map((m) => m.id), [arrived]);
+  await chat.clear(PEER);
+});
+
+test('a message that never left this device is named by its id alone', async () => {
+  await chat.clear(PEER);
+  const { messages } = await chat.append(PEER, { dir: 'out', text: 'ok', pending: true });
+  assert.equal((await chat.identify(messages.at(-1))).h, '');
+  // One from before ids were shared still carries what it was, which is how it is found.
+  const old = { id: 'abcdefgh1', dir: 'out', text: 'ok', at: Date.now() };
+  assert.match((await chat.identify(old)).h, /^[0-9a-f]{16}$/);
+  await chat.clear(PEER);
+  // And every request this app builds is built by that one function.
+  assert.doesNotMatch(MAIN, /h: await chat\.fingerprint\(/);
+});
+
+test('a conversation cleared while a message is being written stays cleared', async () => {
+  // The other device's erase landing while an incoming message was being stored: the store
+  // wrote the whole log back over the erase.
+  await chat.clear(PEER);
+  await chat.append(PEER, { dir: 'in', text: 'before' });
+  const writing = chat.append(PEER, { dir: 'in', text: 'during' });
+  await Promise.resolve();
+  await chat.clear(PEER);
+  await writing;
+  await pause(5);
+  assert.deepEqual((await chat.load(PEER)).messages, []);
+});
+
+/* ─────────────────── what a blip held back ─────────────────── */
+
+function body(name) {
+  const at = MAIN.indexOf(`function ${name}(`);
+  assert.ok(at > 0, `no ${name}`);
+  const open = MAIN.indexOf('{', MAIN.indexOf(')', at));
+  let depth = 0;
+  for (let i = open; i < MAIN.length; i++) {
+    if (MAIN[i] === '{') depth += 1;
+    else if (MAIN[i] === '}' && --depth === 0) return MAIN.slice(at, i + 1);
+  }
+  throw new Error(`${name} does not close`);
+}
+
+test('what a blip held back is sent when the link is back, not only when a new one opens', () => {
+  /*
+   * A relayed conversation outlives a second without its socket, and a direct one a lane that
+   * drops and comes back: neither fires a new 'open', which was the only thing that sent the
+   * outbox, the reactions and the deletes. A message sent in that second stayed "waiting" while
+   * newer ones went straight past it.
+   */
+  assert.match(MAIN, /app\.signal\.addEventListener\('state', \(e\) => \{\s*if \(e\.detail === 'online'\)/);
+  const lane = MAIN.slice(MAIN.indexOf("transport.addEventListener('lane-open'"), MAIN.indexOf("transport.addEventListener('degraded'"));
+  assert.match(lane, /sendOwed\(conn\)/);
+
+  const owed = body('sendOwed');
+  assert.match(owed, /FLUSH_SETTLE_MS/);
+  // An erase this device owes goes before what was written since, or it would erase that too,
+  // and after the settle, not into the moment the code itself says frames get dropped.
+  assert.ok(owed.indexOf('setTimeout(') > 0 && owed.indexOf('flushWipePending') > owed.indexOf('setTimeout('));
+  assert.ok(owed.indexOf('flushWipePending') < owed.indexOf('flushOutbox'));
+  // A reaction after the message it is on.
+  assert.ok(owed.indexOf('flushOutbox') < owed.indexOf('flushReactions'));
+
+  // The outbox is read when it is sent: a wipe landing during a wait must not be undone by a
+  // list read before it.
+  assert.doesNotMatch(body('flushOutbox'), /setTimeout/);
+});
+
+/* ─────────────── deleted while still on its way ─────────────── */
+
+test('a picture or recording deleted while still on its way is stopped on both sides', () => {
+  /*
+   * The bubble is written when the offer goes out, not when the file arrives. Deleted before
+   * that, it went from this device, the other side found nothing to delete yet and said so -
+   * and then the picture arrived there and stayed. For a device that is not verified it sits on
+   * the accept sheet, so it arrived whenever that was tapped.
+   */
+  const del = body('deleteMessages');
+  assert.match(del, /transfers\?\.out\.has\(m\.id\)[\s\S]*abort\(m\.id, 'unsent'\)/, 'the sender does not stop it');
+  const unsend = MAIN.slice(MAIN.indexOf("transfers.addEventListener('unsend'"), MAIN.indexOf("transfers.addEventListener('react'"));
+  assert.match(unsend, /chatTransfers\.get\(item\.id\)[\s\S]*abort\(item\.id, 'unsent'\)/, 'the receiver takes it anyway');
+  const wipe = MAIN.slice(MAIN.indexOf("transfers.addEventListener('wipe'"), MAIN.indexOf("transfers.addEventListener('wipe-ack'"));
+  assert.match(wipe, /stopChatTransfers\(conn\)/, 'an erased conversation still receives what was on its way');
+  assert.match(body('destroyConversation'), /stopChatTransfers\(/);
+  // Stopping it for that reason is not news on either screen.
+  assert.match(MAIN, /transfers\.addEventListener\('aborted', \(e\) => \{\s*finishTransfer\(conn, e\.detail\?\.reason === 'unsent' \? '' : 'toast\.cancelled', 'bad'\);/);
+});
+
+test('an outgoing job knows it belongs to a conversation', async () => {
+  const { tm } = wired();
+  tm.session = { transferKey: async () => new Uint8Array(32) };
+  tm.transport = { chunkSize: 1024 };
+  tm.out = new Map();
+  const id = await tm.offer([new File(['x'], 'a.png', { type: 'image/png' })], { chat: true });
+  assert.equal(tm.out.get(id)?.chat, true);
+});

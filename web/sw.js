@@ -6,7 +6,7 @@
  * operating system hands one over through the share sheet, and even then it only carries
  * it across to the page. It is never uploaded, cached, or written anywhere.
  */
-const VERSION = 'gd-v2.86.0';
+const VERSION = 'gd-v2.87.0';
 const SHELL = [
   './',
   'index.html',
@@ -233,4 +233,18 @@ self.addEventListener('message', (e) => {
   if (!pendingShare) return;
   e.source?.postMessage(pendingShare);
   pendingShare = null;
+});
+
+/*
+ * A notification shown from here - the only way Android Chrome shows one - brings the app back
+ * when it is tapped: the tab it came from if it is still open, otherwise a new one.
+ */
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      const open = wins.find((w) => new URL(w.url).origin === self.location.origin);
+      return open ? open.focus() : self.clients.openWindow('./');
+    }),
+  );
 });

@@ -167,3 +167,13 @@ test('typing is shown, lapses on its own, and stops when a message lands', () =>
   assert.match(body('async function onChatText(conn, { body, mid, re })'), /conn\.typing = 0/);
   assert.match(body('function paintTyping(conn)'), /TYPING_LAPSE_MS|typing > Date\.now\(\)/);
 });
+
+test('a connection that has gone does not come back on its tile from a typing timer', () => {
+  // The timer that clears "typing…" repainted the tile from the connection it had captured,
+  // after the connection was gone: an offline device showed as connected until the next redraw.
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'main.js'), 'utf8');
+  const drop = src.slice(src.indexOf('function dropConn('), src.indexOf('/* ──────────────────────────────── hosting'));
+  assert.match(drop, /clearTimeout\(conn\.typingTimer\)/);
+  const paint = src.slice(src.indexOf('function paintTyping(conn)'), src.indexOf('/** Answer this message'));
+  assert.match(paint, /app\.conns\.get\(conn\.id\) === conn/);
+});

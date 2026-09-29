@@ -145,9 +145,19 @@ export class Radar {
     const h = document.documentElement.clientHeight;
     // Centre the rings exactly on the beacon, so the two read as one object rather than
     // as an animation that happens to sit near a logo.
+    //
+    // In the page's own frame, not the screen's. On a phone the page moves as a whole - slid
+    // aside under the conversation, shrunk into a card behind a sheet - and this canvas, fixed
+    // inside it, moves with it; the beacon's box on screen includes that movement. Measured
+    // through it, a resize while the page was pushed put the rings a hundred pixels off.
     const box = this.originEl?.getBoundingClientRect();
-    const originX = box ? box.left + box.width / 2 : w / 2;
-    const originY = box ? box.top + box.height / 2 : h - 90;
+    const body = document.body;
+    const frame = body?.getBoundingClientRect?.();
+    const scale = frame?.width && body.offsetWidth ? frame.width / body.offsetWidth : 1;
+    const fx = frame?.left || 0;
+    const fy = frame?.top || 0;
+    const originX = box ? (box.left + box.width / 2 - fx) / scale : w / 2;
+    const originY = box ? (box.top + box.height / 2 - fy) / scale : h - 90;
 
     this.metrics = { w, h, dpr, originX, originY };
 

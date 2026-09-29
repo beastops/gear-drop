@@ -380,6 +380,10 @@ async function boot() {
    */
   app.signal.addEventListener('state', paintLinkState);
   app.signal.addEventListener('network', onNetworkLabel);
+  // Back after a blip: whatever a relayed conversation held back in the meantime goes now.
+  app.signal.addEventListener('state', (e) => {
+    if (e.detail === 'online') for (const conn of app.conns.values()) sendOwed(conn);
+  });
   app.signal.connect();
 
   app.radar = new Radar(ui.radar, { originEl: ui.beacon });
@@ -878,6 +882,16 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
   const chan = channel || (peer ? 'paired' : 'code');
 
   /*
+   * This session's conversation, wherever it is filed now.
+   *
+   * By the session, not by `connId`. Pairing re-files a conversation met on the network or by a
+   * code under the pairing's id, and a lookup by the id it started with found nothing after
+   * that and dropped whatever arrived - the other device's "unpair" among it, so forgetting a
+   * device paired in the same visit left the pairing standing on the other one.
+   */
+  const own = () => [...app.conns.values()].find((c) => c.session === session);
+
+  /*
    * The peer said it is on the relay, before there was anywhere to note it.
    *
    * That message is sent the moment the key is agreed, and the handler that creates the
@@ -899,7 +913,20 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
   });
 
   session.addEventListener('secure', async () => {
-    const existing = app.conns.get(connId);
+    const existing = own() || app.conns.get(connId);
+    /*
+     * A conversation a pairing adopted, keying again on the channel or code session it was met
+     * on. That key is the channel's or the code's, not the pairing's, so resuming a paired,
+     * trusted conversation on it would trust a key nobody checked. It goes, and the pairing's own
+     * rendezvous - keyed from the root both devices hold - brings the device back.
+     */
+    if (!peer && existing?.peer && existing.session === session) {
+      dropConn(existing.id);
+      if (member) dropChannelPeer(member.idKey, { keepBusy: false });
+      else session.destroy();
+      resubscribePaired({ force: true }).catch(() => {});
+      return;
+    }
     /*
      * Which path, and what it costs to take it.
      *
@@ -950,6 +977,23 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
     const resuming = !!(existing && existing.session === session && existing.transfers);
 
     if (resuming) {
+      /*
+       * A new key, so new words, and the ones confirmed were for the old key. Carried across, a
+       * re-key forced by whoever sits in the middle would be trusted - and could be paired -
+       * without anybody reading what is now in force. A paired device keeps its trust: its key
+       * is folded from the pairing root either way.
+       */
+      if (!existing.peer) {
+        existing.verified = false;
+        existing.wordsOk = false;
+        existing.theirWordsOk = false;
+        existing.sas = null;
+        // The old words must not stay on screen to be confirmed for the new key.
+        if (verifying === existing) {
+          verifying = null;
+          ui.verify.close();
+        }
+      }
       try {
         existing.transport.close();
       } catch {
@@ -967,7 +1011,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
         await transport.start();
       } catch {
         toast(t('toast.reopenFailed'), 'bad');
-        dropConn(connId);
+        dropConn(existing.id);
       }
       return;
     }
@@ -1013,12 +1057,12 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
       await transport.start();
     } catch {
       if (!member) toast(t('toast.openFailed'), 'bad');
-      dropConn(connId);
+      dropConn(conn.id);
     }
   });
 
   session.addEventListener('message', (e) => {
-    const conn = app.conns.get(connId);
+    const conn = own();
     if (e.detail?.t === 'relay-request') {
       if (!conn) {
         relayAsked = true;
@@ -1062,7 +1106,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
   }
 
   session.addEventListener('sas', (e) => {
-    const conn = app.conns.get(connId);
+    const conn = own();
     // Only this session's own connection. See 'peer-gone' below for how another can hold the id.
     if (!conn || conn.session !== session) return;
     conn.sas = e.detail.join(' · ');
@@ -1081,7 +1125,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
   // and its progress, and wait for the session to re-key. Dropping it here is what makes
   // every other implementation restart a 4 GB file from zero.
   session.addEventListener('peer-gone', () => {
-    const conn = app.conns.get(connId);
+    const conn = own();
     /*
      * Only if the connection under this id is this session's.
      *
@@ -1106,7 +1150,7 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
       toast(t('toast.dropped', { name: conn.name }), 'bad');
       return;
     }
-    dropConn(connId);
+    dropConn(conn.id);
   });
   session.start();
   return connId;
@@ -1236,6 +1280,37 @@ async function useRelay(conn, why) {
   });
 }
 
+/**
+ * Send everything this device owes a connected device: an erase, the outbox, reactions,
+ * deletes, and files that were waiting for the link.
+ *
+ * After a settle, not on the instant: a frame sent the moment this side's channel opens can land
+ * before the other side is listening, and a control frame has no reply to miss. Run whenever
+ * the link comes back, which is not only a new 'open'. A relayed conversation outlives a
+ * second without its socket, and a direct one a lane that drops and returns, and anything sent
+ * into that second was kept and would otherwise wait for the next connection while newer
+ * messages went past it.
+ */
+function sendOwed(conn) {
+  if (conn.owing) return;
+  conn.owing = true;
+  setTimeout(async () => {
+    try {
+      if (conn.closed || conn.state !== 'ready') return;
+      flushWaitingSends(conn).catch(() => {});
+      // In this order: an erase before what was written since, which it must not take with it,
+      // and a reaction after the message it is on.
+      await flushWipePending(conn).catch(() => {});
+      await flushOutbox(conn).catch(() => {});
+      if (conn.closed) return;
+      flushUnsendPending(conn).catch(() => {});
+      flushReactions(conn).catch(() => {});
+    } finally {
+      conn.owing = false;
+    }
+  }, FLUSH_SETTLE_MS);
+}
+
 function wireTransport(conn, only) {
   const transport = only || conn.transport;
   const { transfers } = conn;
@@ -1246,16 +1321,7 @@ function wireTransport(conn, only) {
     conn.state = 'ready';
     transfers._sendCtl({ t: 'rename', name: app.name }).catch(() => {});
     // Anything this device was still owed is sent the moment it is reachable again.
-    flushWipePending(conn);
-    flushOutbox(conn).catch(() => {});
-    // After the same settle the outbox waits for: a frame sent the instant this side's channel
-    // opens can land before the other side is listening, and a delete has no reply to miss.
-    setTimeout(() => {
-      if (conn.closed) return;
-      flushUnsendPending(conn).catch(() => {});
-      flushReactions(conn).catch(() => {});
-      flushWaitingSends(conn).catch(() => {});
-    }, FLUSH_SETTLE_MS);
+    sendOwed(conn);
     app.radar.burst();
     render();
     if (conn.sas && !conn.verified && !conn.member) promptVerify(conn);
@@ -1302,6 +1368,8 @@ function wireTransport(conn, only) {
       if (conn.state === 'offline') {
         conn.state = 'ready';
         render();
+        // Whatever was written while it was away was kept, and no new 'open' will send it.
+        sendOwed(conn);
       }
     }
   });
@@ -1454,8 +1522,8 @@ function wireTransfers(conn) {
   });
   transfers.addEventListener('sent', () => finishTransfer(conn, 'xfer.sent'));
   transfers.addEventListener('declined', () => finishTransfer(conn, 'xfer.declined', 'bad'));
-  transfers.addEventListener('aborted', () => {
-    finishTransfer(conn, 'toast.cancelled', 'bad');
+  transfers.addEventListener('aborted', (e) => {
+    finishTransfer(conn, e.detail?.reason === 'unsent' ? '' : 'toast.cancelled', 'bad');
     runQueuedAccepts();
   });
   transfers.addEventListener('error', (e) => {
@@ -1472,6 +1540,8 @@ function wireTransfers(conn) {
    * holding them - "are you sure?" is a question about someone else's copy.
    */
   transfers.addEventListener('wipe', async () => {
+    // Including a picture or a recording still on its way into it.
+    stopChatTransfers(conn);
     await destroyConversation(conn.id);
     // Answered whether or not there was anything here; see `sendWipeAck`.
     conn.transfers.sendWipeAck().catch(() => {});
@@ -1512,6 +1582,13 @@ function wireTransfers(conn) {
    */
   transfers.addEventListener('unsend', async (e) => {
     const items = e.detail;
+    // A picture or a recording deleted before it got here: its bubble is not here yet to be
+    // found, and it must not arrive afterwards and stay.
+    for (const item of items) {
+      if (chatTransfers.get(item.id)?.id !== conn.id) continue;
+      chatTransfers.delete(item.id);
+      if (conn.transfers.in.has(item.id)) conn.transfers.abort(item.id, 'unsent').catch(() => {});
+    }
     const ids = await chat.resolve(conn.id, items);
     const out = await chat.remove(conn.id, ids);
     if (out.removed.length && ui.chatDialog.open && chatPeerId === conn.id) dissolveBubbles(out.removed, out);
@@ -1604,6 +1681,8 @@ function dropConn(connId, { silent = false } = {}) {
   conn.closed = true;
   clearTimeout(conn.fallbackTimer);
   clearTimeout(conn.deadTimer);
+  clearTimeout(conn.typingTimer);
+  conn.typing = 0;
   app.conns.delete(connId);
 
   /*
@@ -1909,6 +1988,8 @@ function makeChannel(kind, label) {
     const known = await matchPairedHint(member.hints);
     if (known) {
       addAlso(known.id, kind);
+      // Remembered on the member, which is what 'member-gone' hands back, to take the mark off.
+      member.pairedId = known.id;
       /*
        * A member can become recognisable after we first met them, by pairing with us in the
        * meantime. A separate channel conversation is then a duplicate of the paired one, so it
@@ -1949,7 +2030,10 @@ function makeChannel(kind, label) {
   });
 
   ch.addEventListener('member-gone', (e) => {
-    dropChannelPeer(e.detail.idKey, { keepBusy: true });
+    // A paired device recognised here and now gone from here is no longer "on this network".
+    const gone = e.detail;
+    if (gone?.pairedId) app.alsoOn.get(gone.pairedId)?.delete(kind);
+    dropChannelPeer(gone.idKey, { keepBusy: true });
     render();
   });
 
@@ -2134,6 +2218,9 @@ async function joinRoom(raw, { quiet = false } = {}) {
 
   app.roomCode = code;
   app.prefs.publicCode = code;
+  // Kept, so a reload comes back to this room and not the one before it. Quiet is
+  // `setDiscovery`'s call, which saves for itself.
+  if (!quiet) await savePrefs();
   app.channels.room = makeChannel('room', `room:${code}`);
   app.channels.room.addEventListener('member', paintRoom);
   app.channels.room.addEventListener('member-gone', paintRoom);
@@ -2688,7 +2775,11 @@ function updateAmbient() {
  * is not.
  */
 function paintFavicon(p) {
-  if (baseFavicon === null) baseFavicon = ui.favicon.getAttribute('href');
+  // Remembered from the page, never from a ring this function drew.
+  if (baseFavicon === null) {
+    const href = ui.favicon.getAttribute('href');
+    baseFavicon = href?.startsWith('data:') ? 'icon.svg' : href;
+  }
   if (p === null) {
     if (ui.favicon.getAttribute('href') !== baseFavicon) ui.favicon.setAttribute('href', baseFavicon);
     return;
@@ -2711,15 +2802,26 @@ function paintFavicon(p) {
 }
 
 let wakeLock = null;
+let wakeAsking = false;
 async function acquireWake() {
-  if (!app.prefs.awake || wakeLock || !navigator.wakeLock || document.hidden) return;
+  if (!app.prefs.awake || wakeLock || wakeAsking || !navigator.wakeLock || document.hidden) return;
+  wakeAsking = true;
   try {
-    wakeLock = await navigator.wakeLock.request('screen');
-    wakeLock.addEventListener('release', () => {
-      wakeLock = null;
+    const lock = await navigator.wakeLock.request('screen');
+    // The transfer may have finished while the lock was being asked for, and the release that
+    // went with it found nothing to release. Let it go rather than keep the screen on for nothing.
+    if (![...app.conns.values()].some((c) => c.progress)) {
+      lock.release().catch(() => {});
+      return;
+    }
+    wakeLock = lock;
+    lock.addEventListener('release', () => {
+      if (wakeLock === lock) wakeLock = null;
     });
   } catch {
     wakeLock = null; // denied, or not permitted in this context
+  } finally {
+    wakeAsking = false;
   }
 }
 function releaseWake() {
@@ -2806,10 +2908,20 @@ function notify(title, body) {
   document.title = `${title} · Gear Drop`;
 
   if (!app.prefs.notify) return;
+  let granted = false;
   try {
-    if (Notification?.permission === 'granted') new Notification(title, { body, icon: 'icon.svg', silent: true });
+    granted = Notification.permission === 'granted';
   } catch {
-    /* not supported here */
+    return; // no notifications here at all
+  }
+  if (!granted) return;
+  const opts = { body, icon: 'icon.svg', silent: true };
+  try {
+    new Notification(title, opts);
+  } catch {
+    // Android Chrome has no page notifications, only the service worker's. Permission was
+    // granted and the switch shows on; without this, nothing ever appeared there.
+    navigator.serviceWorker?.ready.then((reg) => reg.showNotification(title, opts)).catch(() => {});
   }
 }
 
@@ -3210,6 +3322,13 @@ async function forgetDevice(id, { theirs = false } = {}) {
   }
 
   await removePairing(id);
+  /*
+   * A device met on the network keeps an entry on the channel for the session it was met on,
+   * and that entry outlived the conversation: every later announcement from the device was
+   * taken as one already being talked to, and the two never met there again. Retired with it,
+   * so the next announcement is a stranger's, as it should be now.
+   */
+  if (conn?.member) dropChannelPeer(conn.member.idKey, { keepBusy: false });
   dropConn(id);
   await refreshPaired();
   /*
@@ -3786,11 +3905,13 @@ let heldSend = null;
  */
 function releaseHeldSend(answered) {
   if (!heldSend) return;
+  // Files go as files; a picture or a recording from the conversation goes back into it.
+  const send = (w) => (w.media ? sendChatMedia(w.connId, w.media, w.opts) : w.files?.length && sendFiles(w.connId, w.files));
 
   if (heldSend.connId === answered.id) {
     const waiting = heldSend;
     heldSend = null;
-    if (waiting.files?.length) sendFiles(waiting.connId, waiting.files);
+    send(waiting);
     return;
   }
 
@@ -3805,7 +3926,7 @@ function releaseHeldSend(answered) {
   }
   const waiting = heldSend;
   heldSend = null;
-  if (waiting.files?.length) sendFiles(waiting.connId, waiting.files);
+  send(waiting);
 }
 
 function promptVerify(conn, { force = false, asked = false } = {}) {
@@ -4135,6 +4256,21 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
   const scrolledTo = ui.chatLog.scrollTop;
   // Which of these are already on screen: those are redrawn in place, not animated in again.
   const shown = new Set([...ui.chatLog.children].map((el) => el.dataset.id).filter(Boolean));
+  /*
+   * A recording that is playing, or part-way through, is carried across.
+   *
+   * Rebuilding the log takes every element out of the document, and a media element taken out
+   * of the document stops: a message arriving half way through a voice note stopped it and put
+   * it back to 0:00. The same player goes into the new row instead, in the same task, so it
+   * is never out of the document when the browser looks.
+   */
+  const playing = new Map();
+  for (const a of ui.chatLog.querySelectorAll('audio')) {
+    if (a.paused && !a.currentTime) continue;
+    const id = a.closest('[data-id]')?.dataset.id;
+    const wrap = a.closest('.audio-wrap');
+    if (id && wrap) playing.set(id, wrap);
+  }
   ui.chatLog.replaceChildren();
   ui.chatEmpty.hidden = messages.length > 0 || locked;
   ui.chatLocked.hidden = !locked;
@@ -4191,7 +4327,7 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
       tools.append(bubbleTool('#i-install', t('chat.save'), () => saveChatMedia(m)));
     } else if (m.kind === 'audio') {
       row.classList.add('audio');
-      row.append(audioFigure(m));
+      row.append(playing.get(m.id) || audioFigure(m));
       tools.append(bubbleTool('#i-install', t('chat.saveAudio'), () => saveChatMedia(m)));
     } else {
       // Peer text, always as a text node. Never innerHTML, on either side.
@@ -4601,7 +4737,7 @@ async function reactTo(peerId, m, emoji) {
   }
   if (!live) return;
   try {
-    await conn.transfers.sendReaction({ id: m.id, dir: m.dir, at: m.at, h: await chat.fingerprint(m) }, emoji);
+    await conn.transfers.sendReaction(await chat.identify(m), emoji);
   } catch {
     await chat.react(peerId, m.id, 'me', emoji, { pending: true });
   }
@@ -4617,7 +4753,7 @@ async function flushReactions(conn) {
     const m = messages.find((x) => x.id === id);
     if (!m) continue;
     try {
-      await conn.transfers.sendReaction({ id, dir: m.dir, at: m.at, h: await chat.fingerprint(m) }, e);
+      await conn.transfers.sendReaction(await chat.identify(m), e);
       sent.push(id);
     } catch {
       break; // the rest go on the next connection
@@ -4783,8 +4919,9 @@ function paintTyping(conn) {
     // Brought into view if the conversation was already at its newest, as a message would be.
     if (on && atBottom) ui.chatLog.scrollTop = ui.chatLog.scrollHeight;
   }
+  // Only the connection that is still here: a gone one painted its tile back to "connected".
   const tile = tileFor(conn.id);
-  if (tile && !conn.progress) paintTile(tile, conn);
+  if (tile && !conn.progress && app.conns.get(conn.id) === conn) paintTile(tile, conn);
   clearTimeout(conn.typingTimer);
   if (on) conn.typingTimer = setTimeout(() => paintTyping(conn), conn.typing - Date.now() + 50);
 }
@@ -5021,8 +5158,19 @@ function onSwipeReply(row, reply) {
  */
 async function deleteMessages(peerId, list) {
   if (!peerId || !list?.length) return;
+  /*
+   * A picture or a recording still on its way is stopped, not only deleted here.
+   *
+   * Its bubble is written when the offer goes out, not when the file arrives, so deleting it
+   * mid-way left the transfer running: the other side found nothing to delete yet, said so,
+   * and then received the picture and kept it.
+   */
+  const live = app.conns.get(peerId);
+  for (const m of list) {
+    if (live?.transfers?.out.has(m.id)) live.transfers.abort(m.id, 'unsent').catch(() => {});
+  }
   const items = await Promise.all(
-    list.map(async (m) => ({ id: m.id, dir: m.dir, at: m.at, h: await chat.fingerprint(m) })),
+    list.map((m) => chat.identify(m)),
   );
   const out = await chat.remove(peerId, items.map((i) => i.id));
   if (ui.chatDialog.open && chatPeerId === peerId) dissolveBubbles(out.removed, out);
@@ -5053,6 +5201,8 @@ async function deleteMessages(peerId, list) {
  */
 function dissolveBubbles(ids, { messages, locked = false, ephemeral = false }) {
   const gone = new Set(ids);
+  // Answering a message that is no longer there answers nothing.
+  if (replyTo && gone.has(replyTo.id)) cancelReply();
   const rows = [...ui.chatLog.children].filter((el) => gone.has(el.dataset.id));
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -5294,6 +5444,13 @@ async function paintPhoto(wrap, img, m) {
     { once: true },
   );
 
+  // A redraw while this was decrypting may have painted the same picture already. Its URL is
+  // the one kept; a second would be decrypted bytes nothing could ever revoke.
+  const have = mediaUrls.get(m.att);
+  if (have) {
+    img.src = have;
+    return;
+  }
   const url = URL.createObjectURL(new Blob([bytes], { type: m.mime || 'application/octet-stream' }));
   mediaUrls.set(m.att, url);
   img.src = url;
@@ -5515,15 +5672,24 @@ function wireAudio({ wrap, audio, play, track, time, rate, m }) {
     time.textContent = fmtClock(audio.paused && !at ? dur : at);
   };
 
-  /** Decrypt on demand. Nothing is read until somebody asks to hear it. */
-  const ensure = async () => {
-    if (loaded) return true;
+  /**
+   * Decrypt on demand. Nothing is read until somebody asks to hear it.
+   *
+   * Once, however many presses arrive while it runs: two decrypts each made an object URL of
+   * the bytes and only one of them was kept, so the other was never revoked, and the second
+   * source cut off the first one's start.
+   */
+  let loading = null;
+  const ensure = () => {
+    if (loaded) return Promise.resolve(true);
+    loading ||= load().finally(() => {
+      loading = null;
+    });
+    return loading;
+  };
+  const load = async () => {
     const cached = mediaUrls.get(m.att);
-    if (cached) {
-      audio.src = cached;
-      loaded = true;
-      return true;
-    }
+    if (cached) return use(cached);
     const token = chatToken;
     const bytes = await chat.getAttachment(m.att).catch(() => null);
     if (token !== chatToken) return false;
@@ -5536,8 +5702,14 @@ function wireAudio({ wrap, audio, play, track, time, rate, m }) {
       wrap.append(gone);
       return false;
     }
+    // Another player for the same message may have got there first.
+    const have = mediaUrls.get(m.att);
+    if (have) return use(have);
     const url = URL.createObjectURL(new Blob([bytes], { type: m.mime || 'audio/mpeg' }));
     mediaUrls.set(m.att, url);
+    return use(url);
+  };
+  const use = (url) => {
     audio.src = url;
     loaded = true;
     return true;
@@ -5550,7 +5722,11 @@ function wireAudio({ wrap, audio, play, track, time, rate, m }) {
     for (const other of document.querySelectorAll('#chat-log audio')) {
       if (other !== audio) other.pause();
     }
-    audio.play().catch(() => toast(t('chat.audioKind'), 'bad'));
+    audio.play().catch((err) => {
+      // Interrupted - a second press, another note starting, a redraw - is not unplayable.
+      // A format this browser cannot decode also arrives as the element's 'error', below.
+      if (err?.name !== 'AbortError') toast(t('chat.audioKind'), 'bad');
+    });
   });
 
   const setPlaying = (on) => {
@@ -5584,18 +5760,32 @@ function wireAudio({ wrap, audio, play, track, time, rate, m }) {
     paint();
   };
 
+  /*
+   * A press that ended while the recording was still being decrypted is a tap: it jumps to
+   * where it landed and holds nothing. Taking it as a drag after the finger had gone left the
+   * player scrubbing on every hover, and on a phone froze the clock while it played.
+   */
+  let pressed = false;
   track.addEventListener('pointerdown', async (e) => {
+    pressed = true;
     if (!(await ensure())) return;
+    if (!pressed) return seekTo(e.clientX);
     seeking = true;
-    track.setPointerCapture(e.pointerId);
+    try {
+      track.setPointerCapture(e.pointerId);
+    } catch {
+      /* lifted in between */
+    }
     seekTo(e.clientX);
   });
   track.addEventListener('pointermove', (e) => seeking && seekTo(e.clientX));
   track.addEventListener('pointerup', (e) => {
+    pressed = false;
     seeking = false;
     track.releasePointerCapture?.(e.pointerId);
   });
   track.addEventListener('pointercancel', () => {
+    pressed = false;
     seeking = false;
   });
 
@@ -5612,6 +5802,8 @@ function wireAudio({ wrap, audio, play, track, time, rate, m }) {
 
   rate?.addEventListener('click', () => {
     const next = RATES[(RATES.indexOf(audio.playbackRate) + 1) % RATES.length] ?? 1;
+    // Both: giving the element its source on the first play resets the rate to the default.
+    audio.defaultPlaybackRate = next;
     audio.playbackRate = next;
     rate.textContent = `${next}×`;
   });
@@ -5729,37 +5921,71 @@ async function startRecording() {
   if (recorder || !chatPeerId) return;
   if (!canRecord()) return toast(t('chat.noMic'), 'bad');
 
+  /*
+   * The slot is taken before the wait, not after it.
+   *
+   * Asking for the microphone takes a moment - a permission prompt, a headset waking - and
+   * nothing on screen changes meanwhile. A second tap in that moment opened a second stream
+   * that nothing held any more, so the microphone stayed on until the tab closed; and closing
+   * the conversation in that moment cancelled nothing, so the recording started behind a
+   * closed sheet. Now the second tap finds the slot taken, and a cancel marks it.
+   */
+  const rec = { peer: chatPeerId, mr: null, stream: null, chunks: [], startedAt: 0, cancelled: false, timer: 0, cap: 0 };
+  recorder = rec;
+
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
+    if (recorder === rec) recorder = null;
+    if (rec.cancelled) return;
     // A refusal is a decision, not a fault: say which it was and stop.
     return toast(t(err?.name === 'NotFoundError' ? 'chat.noMic' : 'chat.micBlocked'), 'bad');
   }
+  const stopStream = () => {
+    for (const track of stream.getTracks()) track.stop();
+  };
+  if (recorder !== rec || rec.cancelled || !ui.chatDialog.open || chatPeerId !== rec.peer) {
+    stopStream();
+    if (recorder === rec) recorder = null;
+    paintRecording();
+    return;
+  }
 
   const type = recordingType();
-  const chunks = [];
-  const mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
-  const startedAt = Date.now();
+  let mr;
+  try {
+    mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    mr.addEventListener('dataavailable', (e) => {
+      if (e.data?.size) rec.chunks.push(e.data);
+    });
+    mr.addEventListener('stop', () => finishRecording(rec));
+    mr.start();
+  } catch {
+    stopStream();
+    recorder = null;
+    paintRecording();
+    return toast(t('chat.noMic'), 'bad');
+  }
+  Object.assign(rec, { mr, stream, startedAt: Date.now() });
 
-  recorder = { mr, stream, chunks, startedAt, cancelled: false, timer: 0, cap: 0 };
-
-  mr.addEventListener('dataavailable', (e) => {
-    if (e.data?.size) chunks.push(e.data);
-  });
-  mr.addEventListener('stop', () => finishRecording());
-
-  mr.start();
   // The microphone stays live until every track is stopped, so the cap is a real one: a
   // forgotten recording must not keep the indicator lit indefinitely.
-  recorder.cap = setTimeout(() => stopRecording(), MAX_RECORDING_MS);
-  recorder.timer = setInterval(paintRecording, 200);
+  rec.cap = setTimeout(() => {
+    if (mr.state === 'recording') mr.stop();
+  }, MAX_RECORDING_MS);
+  rec.timer = setInterval(paintRecording, 200);
   paintRecording();
 }
 
-/** Stop and send. The `stop` event does the work, so cancelling can use the same path. */
+/**
+ * Stop and send. The `stop` event does the work, so cancelling can use the same path.
+ *
+ * A tap while the microphone is still being asked for does nothing: that is the person trying
+ * again because nothing seemed to happen, not asking to stop what has not started.
+ */
 function stopRecording() {
-  if (recorder?.mr.state === 'recording') recorder.mr.stop();
+  if (recorder?.mr?.state === 'recording') recorder.mr.stop();
 }
 
 function cancelRecording() {
@@ -5768,10 +5994,8 @@ function cancelRecording() {
   stopRecording();
 }
 
-async function finishRecording() {
-  const rec = recorder;
-  if (!rec) return;
-  recorder = null;
+async function finishRecording(rec) {
+  if (recorder === rec) recorder = null;
 
   clearInterval(rec.timer);
   clearTimeout(rec.cap);
@@ -5787,7 +6011,8 @@ async function finishRecording() {
 
   const stamp = new Date(rec.startedAt).toISOString().slice(0, 19).replaceAll(':', '-');
   const file = new File([blob], `voice-${stamp}.${extensionFor(blob.type)}`, { type: blob.type });
-  await sendChatMedia(chatPeerId, file, { voice: true, dur: seconds });
+  // To the conversation it was recorded in, which is the one it was cancelled with if it closed.
+  await sendChatMedia(rec.peer, file, { voice: true, dur: seconds });
 }
 
 /** A file name wants an extension, and the recorder only hands back a media type. */
@@ -5801,7 +6026,8 @@ function extensionFor(mime) {
 
 /** The composer while a recording is running: elapsed time, and the two ways out of it. */
 function paintRecording() {
-  const on = !!recorder;
+  // Running, not merely asked for: until the microphone answers there is no clock to show.
+  const on = !!recorder?.mr;
   ui.chatRec.hidden = !on;
   ui.chatComposer.classList.toggle('recording', on);
   ui.chatMic.setAttribute('aria-pressed', String(on));
@@ -5990,20 +6216,22 @@ async function sendChat() {
  * flush that cleared its flags anyway would lose a message without delivering it.
  */
 async function flushOutbox(conn) {
-  const waiting = await chat.pendingFor(conn.id).catch(() => []);
-  if (!waiting.length) return;
-
   /*
-   * Not on the instant the transport opens.
+   * Not on the instant the transport opens: `sendOwed` waits before calling this.
    *
    * This side calls a transport open as soon as its own channel is usable, which is not when
    * the other side has attached a receiver to theirs. A frame sent into that gap is carried
    * and dropped silently, because a control frame has no acknowledgement to miss. Measured:
    * the first of two queued messages never arrived, while the second, a few hundred
    * milliseconds behind it, always did.
+   *
+   * And the list is read here, after that wait rather than before it. An erase from the other
+   * device lands in exactly that window, and a list read before it sent messages this device
+   * had already destroyed.
    */
-  await new Promise((r) => setTimeout(r, FLUSH_SETTLE_MS));
   if (conn.closed || conn.state !== 'ready') return;
+  const waiting = await chat.pendingFor(conn.id).catch(() => []);
+  if (!waiting.length) return;
 
   const sent = [];
   for (const m of waiting) {
@@ -6081,6 +6309,25 @@ async function flushWipePending(conn) {
  * a device that is off cannot be made to forget anything now, and refusing to delete our own
  * copy over that would leave the one machine we control holding the conversation.
  */
+/**
+ * Stop every picture and recording on its way into or out of a conversation that is going.
+ *
+ * Both directions: the one arriving is noted in `chatTransfers` until it lands, and the one
+ * leaving is a job marked as the conversation's. Files sent the ordinary way are not touched -
+ * they were never part of it.
+ */
+function stopChatTransfers(conn) {
+  if (!conn?.transfers) return;
+  for (const [transferId, note] of [...chatTransfers]) {
+    if (note?.id !== conn.id) continue;
+    chatTransfers.delete(transferId);
+    if (conn.transfers.in.has(transferId)) conn.transfers.abort(transferId, 'unsent').catch(() => {});
+  }
+  for (const [transferId, job] of [...conn.transfers.out]) {
+    if (job.chat) conn.transfers.abort(transferId, 'unsent').catch(() => {});
+  }
+}
+
 async function destroyConversation(id, { tell = false, owe = true } = {}) {
   /*
    * Whether the other device was actually told, which is not the same as having tried.
@@ -6092,6 +6339,14 @@ async function destroyConversation(id, { tell = false, owe = true } = {}) {
    */
   let told = false;
   const conn = app.conns.get(id);
+  // What was still on its way into it goes too, or it arrives in the empty conversation after.
+  stopChatTransfers(conn);
+  const waiting = waitingSends.get(id);
+  if (waiting) {
+    const files = waiting.filter((w) => !w.media);
+    if (files.length) waitingSends.set(id, files);
+    else waitingSends.delete(id);
+  }
   if (tell && conn?.transfers) {
     try {
       await conn.transfers.sendWipe();
@@ -6143,6 +6398,10 @@ async function destroyConversation(id, { tell = false, owe = true } = {}) {
      * animation here at all.
      */
     const dust = captureDust(ui.chatLog.closest('.chat-sheet'), ui.chatLog.children);
+    // A picture still being decrypted for it must not put its URL back afterwards, and a quote
+    // of one of its messages must not stay above the keyboard.
+    chatToken++;
+    cancelReply();
     releaseMedia();
     renderChat([]);
     paintChatState();
@@ -6165,6 +6424,14 @@ async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
   const conn = app.conns.get(peerId);
   if (!conn || !file) return;
   if (conn.state !== 'ready') return waitToSend(conn, { media: file, opts: { voice, dur } });
+
+  // The same gate as `sendFiles`, for the same reason: a picture or a recording you chose is
+  // what somebody in the middle would want, and it waits for the words like any file does.
+  if (!conn.verified && !sasConfirmed(conn)) {
+    heldSend = { connId: peerId, media: file, opts: { voice, dur } };
+    promptVerify(conn, { force: true });
+    return;
+  }
 
   /*
    * Something a conversation should not be holding still gets sent.
@@ -6988,6 +7255,8 @@ function bindUi() {
   ui.chatDialog.addEventListener('close', () => {
     // A sheet that closes mid-recording must not leave the microphone running behind it.
     cancelRecording();
+    // Nor a recording playing, with no player on screen left to stop it.
+    for (const a of ui.chatLog.querySelectorAll('audio')) a.pause();
     releaseMedia();
     chatToken++;
   });
@@ -7129,12 +7398,11 @@ function bindUi() {
 
   addEventListener('visibilitychange', () => {
     if (document.hidden) return;
-    acquireWake();
-    // Seen. The title goes back to the app's name.
-    if (announced) {
-      announced = null;
-      updateAmbient();
-    }
+    // Seen: the title goes back to the app's name. And the screen is kept awake again only if
+    // something is moving - the setting says "during transfers", and a lock taken here on an
+    // idle page stayed until the tab was hidden again.
+    announced = null;
+    updateAmbient();
   });
 
   addEventListener('pointerdown', (e) => {
@@ -7221,6 +7489,7 @@ function watchModals() {
   const dialogs = [...document.querySelectorAll('dialog')];
   modalStack = dialogs.filter((d) => d.open);
   const anyOpen = () => dialogs.some((d) => d.open);
+  let chatWas = ui.chatDialog.open;
   // A backgrounded tab is the same situation as a modal: nothing worth drawing. Both
   // conditions go through one function so closing a dialog in a hidden tab cannot wake the
   // radar back up.
@@ -7232,7 +7501,13 @@ function watchModals() {
      */
     const chatOpen = ui.chatDialog.open;
     document.body.classList.toggle('pushed', chatOpen);
-    if (!chatOpen) document.body.style.removeProperty('--push');
+    /*
+     * How far a drag from the edge has taken the conversation away, cleared as it opens and not
+     * as it closes. A completed drag is still sliding out when it closes, over a screen already
+     * fully revealed, and clearing it then brought the shade back for the length of the slide.
+     */
+    if (chatOpen && !chatWas) document.body.style.removeProperty('--push');
+    chatWas = chatOpen;
     document.body.classList.toggle('card-behind', !chatOpen && dialogs.some((d) => d.open && d.classList.contains('sheet')));
     if (document.hidden || anyOpen()) {
       app.radar?.pause();
@@ -7422,7 +7697,6 @@ function applyTheme() {
   for (const b of document.querySelectorAll('[data-theme-choice]')) {
     b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice));
   }
-  baseFavicon = null; // the resting icon depends on the theme
 
   /*
    * The radar is told here, not by whoever changed the theme.

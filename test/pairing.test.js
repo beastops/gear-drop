@@ -188,3 +188,57 @@ test('a remembered device is not drawn twice beside itself', () => {
   assert.match(body('function render()'), /staleTwin\(/, 'an offline record is drawn beside the same device live');
   assert.match(body('async function rememberPair(conn)'), /supersede\(/, 'pairing again leaves the stale record behind');
 });
+
+/* ─────────────── after pairing, in the same visit ─────────────── */
+
+const ATTACH = (() => {
+  const at = MAIN.indexOf('function attachSession(session, ');
+  return MAIN.slice(at, MAIN.indexOf('\n}\n', at));
+})();
+const handler = (event) => {
+  const at = ATTACH.indexOf(`session.addEventListener('${event}'`);
+  assert.ok(at > 0, `no ${event} handler`);
+  return ATTACH.slice(at, ATTACH.indexOf('\n  });', at));
+};
+
+test('a conversation adopted by a pairing still hears the session it arrived on', () => {
+  /*
+   * Pairing re-files the conversation under the pairing's id. The handlers looked it up by the
+   * id they started with, found nothing, and dropped what came: the other device's "unpair"
+   * among it, so forgetting a device paired in the same visit left the pairing on the other one.
+   */
+  for (const event of ['message', 'sas', 'peer-gone']) {
+    assert.match(handler(event), /const conn = own\(\);/, `${event} looks the conversation up by the id it started with`);
+  }
+  assert.doesNotMatch(handler('peer-gone'), /dropConn\(connId\)/);
+  assert.match(handler('secure'), /const existing = own\(\) \|\| app\.conns\.get\(connId\);/);
+  // Found by its session, it must not be resumed there: that key is the channel's or the code's,
+  // not the pairing's, and the pairing's own rendezvous is what brings it back.
+  assert.match(handler('secure'), /if \(!peer && existing\?\.peer && existing\.session === session\) \{/);
+});
+
+test('a key agreed again asks for the words again', () => {
+  // The words confirmed were for the old key. Carried across, a re-key forced by whoever sits
+  // in the middle would be trusted - and paired - without anybody reading the new ones.
+  const secure = handler('secure');
+  const resume = secure.slice(secure.indexOf('if (resuming) {'));
+  assert.match(resume, /if \(!existing\.peer\) \{[^}]*existing\.verified = false;[^}]*existing\.wordsOk = false;[^}]*existing\.theirWordsOk = false;/);
+  assert.match(resume, /if \(verifying === existing\)/, 'the old words stay on screen to be confirmed');
+});
+
+test('forgetting a device met on the network lets the two meet there again', () => {
+  // The channel's entry for it outlived the conversation, and every later announcement from
+  // that device was taken as one already being talked to.
+  assert.match(body('async function forgetDevice(id, { theirs = false } = {})'), /dropChannelPeer\(conn\.member\.idKey, \{ keepBusy: false \}\)/);
+});
+
+test('a room joined from a link is the one a reload comes back to', () => {
+  // Already public, the new code was set in memory only, and a reload rejoined the room left.
+  assert.match(body('async function joinRoom(raw, { quiet = false } = {})'), /app\.prefs\.publicCode = code;[\s\S]{0,200}?if \(!quiet\) await savePrefs\(\);/);
+});
+
+test('a paired device that leaves the network stops being marked as on it', () => {
+  const make = body('function makeChannel(kind, label)');
+  assert.match(make, /member\.pairedId = known\.id;/);
+  assert.match(make, /if \(gone\?\.pairedId\) app\.alsoOn\.get\(gone\.pairedId\)\?\.delete\(kind\);/);
+});

@@ -111,3 +111,17 @@ test('the page draws runs, time lines, the last sent message\'s state and each m
   // And Android shrinks the page for the keyboard, so the text box stays above it.
   assert.match(HTML, /interactive-widget=resizes-content/);
 });
+
+test('a voice message does not cut off its reaction, its reply arrow or its time', () => {
+  // The bubble clipped everything drawn just outside it: the heart on it, the arrow a swipe
+  // pulls out, the time a swipe to the left shows, its tail, and on a computer its buttons.
+  const rule = CSS.slice(CSS.indexOf('.bubble.audio {'), CSS.indexOf('}', CSS.indexOf('.bubble.audio {')));
+  assert.doesNotMatch(rule, /overflow:\s*hidden/);
+});
+
+test('on a phone, the recording bar sits above the text box, clear of the home bar', () => {
+  // It came after the composer, the last thing on the page, in the strip the home indicator
+  // covers, with the composer's own safe-area padding left empty above it.
+  const phone = phoneBlock();
+  assert.match(phone, /#chat-dialog \.chat-composer\s*\{[^}]*order:\s*1/);
+});

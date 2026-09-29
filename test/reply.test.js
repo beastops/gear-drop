@@ -133,3 +133,10 @@ test('on a phone, holding a message lifts it over the whole screen', () => {
 test('swiping down the conversation puts the keyboard away', () => {
   assert.match(MAIN, /ui\.chatInput\.blur\(\)/);
 });
+
+test('a quote waiting to be sent goes when the message it quotes does', () => {
+  // The other device deleted the message, or the conversation went: "Replying to" still showed
+  // the deleted words above the keyboard, and the next message answered nothing.
+  assert.match(body('async function destroyConversation(id, { tell = false, owe = true } = {})'), /cancelReply\(\)/);
+  assert.match(body('function dissolveBubbles(ids, { messages, locked = false, ephemeral = false })'), /if \(replyTo && gone\.has\(replyTo\.id\)\) cancelReply\(\)/);
+});

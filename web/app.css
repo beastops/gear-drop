@@ -1745,8 +1745,11 @@ body.theme-light .peer.ready .avatar {
   max-width: 78%;
   white-space: normal;
   line-height: normal;
-  /* Nothing inside may draw outside: the rounded corner is the edge of the message. */
-  overflow: hidden;
+  /*
+   * No clipping here. The waveform and the song's name clip themselves; what sits just outside
+   * the bubble on purpose - a reaction, the reply arrow, the time, the tail, the buttons beside
+   * it - was being cut off on voice messages and nowhere else.
+   */
 }
 .audio-wrap {
   display: flex;
@@ -5342,7 +5345,13 @@ dialog.confirm::backdrop { background: transparent; }
 
   /* The text box: a rounded field with the send arrow, or the microphone, inside it. */
   #chat-dialog .chat-reply { margin: 0 10px 6px; }
+  /*
+   * The composer is always last, so it is what keeps the safe-area padding; the recording bar,
+   * which comes after it in the document, sits above it instead of under the home indicator.
+   */
+  #chat-dialog .chat-rec { margin: 0 10px 6px; }
   #chat-dialog .chat-composer {
+    order: 1;
     position: relative;
     align-items: flex-end;
     gap: 8px;

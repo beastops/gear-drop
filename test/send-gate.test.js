@@ -108,3 +108,20 @@ test('and a question that could not be asked yet still gets asked', () => {
   const release = body('function releaseHeldSend(answered)');
   assert.match(release, /promptVerify\(other, \{ force: true \}\)/, 'a turned-away question is never raised again');
 });
+
+test('a picture or a recording sent from the conversation is held for the words too', () => {
+  /*
+   * The comment on the funnel said the chat attachment arrived there. It did only for files the
+   * conversation could not show; every picture and every voice message went straight to the
+   * offer, to a device nobody had checked, which is exactly what the words are for.
+   */
+  // Sliced by hand: the helper would stop at the braces of the options in the signature.
+  const sig = 'async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {})';
+  const from = MAIN.indexOf(sig);
+  assert.ok(from > 0, 'sendChatMedia has gone');
+  const media = MAIN.slice(from, MAIN.indexOf('\n}\n', from));
+  const gate = media.search(/!conn\.verified && !sasConfirmed\(conn\)/);
+  assert.ok(gate > 0 && gate < media.indexOf('conn.transfers.offer('), 'a chat picture goes to an unchecked device');
+  // And once they are checked it goes, as a picture in the conversation, not as a file.
+  assert.match(body('function releaseHeldSend(answered)'), /sendChatMedia\(/);
+});

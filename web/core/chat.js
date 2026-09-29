@@ -318,6 +318,8 @@ async function appendNow(peerId, { dir, text, media, pending = false, id = null,
    * history and what lets the log show the difference between sent and waiting.
    */
   if (pending) msg.pending = true;
+  // Named by an id both sides hold, so it is only ever found by that id. See `resolve`.
+  if (isMessageId(id)) msg.sid = true;
   // What this answers, by id only: the quote is looked up from this side's own copy when it is
   // drawn, so a reply never holds a second copy of somebody's words.
   if (isMessageId(re)) msg.re = re;
@@ -417,6 +419,18 @@ export async function fingerprint(m) {
 }
 
 /**
+ * How a delete or a reaction names a message to the other device.
+ *
+ * The fingerprint only for a message that might predate shared ids. One still waiting to send
+ * never reached the other side, and one with a shared id is there under that id or not at all;
+ * a fingerprint for either could only match some other message that says the same thing.
+ */
+export async function identify(m) {
+  const h = m.pending || m.sid ? '' : await fingerprint(m);
+  return { id: m.id, dir: m.dir, at: m.at, h };
+}
+
+/**
  * The reactions a conversation allows.
  *
  * A fixed few, so a reaction is never free text: one arriving from the other device is checked
@@ -490,6 +504,8 @@ const MATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
  * By the shared id first. A message from before ids were shared has a different one on each
  * side, so it is found by what it was: the other direction (their "sent" is this side's
  * "received"), the same fingerprint, and the closest time, each message claimed at most once.
+ * Only such a message: one stored under a shared id that the request did not name is some other
+ * message that happens to say the same thing.
  */
 export async function resolve(peerId, items) {
   const { messages, locked } = await load(peerId);
@@ -509,7 +525,7 @@ export async function resolve(peerId, items) {
     const mine = item.dir === 'out' ? 'in' : 'out';
     let best = null;
     for (const m of messages) {
-      if (claimed.has(m.id) || m.dir !== mine) continue;
+      if (claimed.has(m.id) || m.dir !== mine || m.sid) continue;
       const gap = Math.abs(m.at - item.at);
       if (gap > MATCH_WINDOW_MS || (best && gap >= best.gap)) continue;
       if ((await fingerprint(m)) !== item.h) continue;
@@ -583,7 +599,7 @@ async function adoptNow(fromId, toId) {
   const from = await load(fromId);
   if (from.locked) return false;
   if (!from.messages.length) {
-    await clear(fromId);
+    await clearNow(fromId);
     return true;
   }
 
@@ -604,12 +620,22 @@ async function adoptNow(fromId, toId) {
 
   if (isDurable(toId)) await save(toId, merged);
   else session.set(toId, merged.slice(-MAX_MESSAGES));
-  await clear(fromId);
+  await clearNow(fromId);
   return true;
 }
 
-/** Forget one conversation. Called when a device is unpaired, and from the chat itself. */
-export async function clear(peerId) {
+/**
+ * Forget one conversation. Called when a device is unpaired, and from the chat itself.
+ *
+ * In the same queue as every other write to it. Deleting the row directly let a write already
+ * under way - an incoming message being stored, a flush marking the outbox sent - finish by
+ * saving the whole log it had read back over the erase.
+ */
+export function clear(peerId) {
+  return serialise(peerId, () => clearNow(peerId));
+}
+
+async function clearNow(peerId) {
   if (!peerId) return;
   session.delete(peerId);
   await chats.del(peerId).catch(() => {});

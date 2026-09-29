@@ -344,3 +344,39 @@ test('the main-thread fallback is paced like the worker, and stops when paused',
   assert.ok(counter.frames >= 24, 'it did not come back');
   assert.ok(display.pending() <= 1, 'resuming started a second loop alongside the first');
 });
+
+/* ------------------------------------------- where the rings are centred */
+
+test('the rings stay on the beacon when the page is measured while pushed aside', async () => {
+  /*
+   * On a phone the page itself moves - slid a quarter left under the conversation, shrunk into
+   * a card behind a sheet - and the canvas, fixed inside it, moves with it. The beacon's box
+   * on screen includes that movement. A resize measured then (the keyboard opening in the chat
+   * is one) put the rings a hundred pixels off the beacon, and nothing moved them back.
+   */
+  const display = fakeDisplay();
+  const listeners = pageGlobals(display, { reduced: true });
+  void listeners;
+  globalThis.document.documentElement = { clientWidth: 390, clientHeight: 844 };
+  // Pushed: the body is drawn 28% of its width to the left, at full size.
+  const shift = -0.28 * 390;
+  globalThis.document.body = {
+    classList: { contains: () => false },
+    offsetWidth: 390,
+    getBoundingClientRect: () => ({ left: shift, top: 0, width: 390, height: 844 }),
+  };
+  const beacon = { getBoundingClientRect: () => ({ left: 195 - 20 + shift, top: 700, width: 40, height: 40 }) };
+  const { Radar } = await import('../web/core/ripple.js');
+  const { ctx } = countingContext();
+  const radar = new Radar({ style: {}, width: 0, height: 0, getContext: () => ctx }, { originEl: beacon });
+  radar.resize();
+  assert.equal(Math.round(radar.metrics.originX), 195, 'the rings are off the beacon');
+  assert.equal(Math.round(radar.metrics.originY), 720);
+
+  // Shrunk into a card: scaled 0.92 about the top centre, and moved down a little.
+  globalThis.document.body.getBoundingClientRect = () => ({ left: 390 * 0.04, top: 10, width: 390 * 0.92, height: 844 * 0.92 });
+  beacon.getBoundingClientRect = () => ({ left: 390 * 0.04 + (195 - 20) * 0.92, top: 10 + 700 * 0.92, width: 40 * 0.92, height: 40 * 0.92 });
+  radar.resize();
+  assert.equal(Math.round(radar.metrics.originX), 195);
+  assert.equal(Math.round(radar.metrics.originY), 720);
+});
