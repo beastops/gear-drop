@@ -91,6 +91,7 @@ const en = {
   'common.or': 'or',
   'common.ok': 'OK',
   'common.cancel': 'Cancel',
+  'common.delete': 'Delete',
   'common.send': 'Send',
   'common.copy': 'Copy link',
   'common.save': 'Save',

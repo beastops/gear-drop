@@ -690,6 +690,24 @@
   the peer, so it is simply there again the next time that device is.
 -->
 <!--
+  A question before something that cannot be undone. Filled from script; see askConfirm.
+  The dialog is the dimmed screen and the card sits in it: at the bottom on a phone.
+-->
+<dialog id="confirm-dialog" class="confirm" data-no-swipe aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <div class="confirm-card">
+    <div class="confirm-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><use href="#i-trash"/></svg>
+    </div>
+    <h2 id="confirm-title" class="confirm-title"></h2>
+    <p id="confirm-body" class="confirm-body"></p>
+    <div class="confirm-actions">
+      <button id="btn-confirm-yes" class="confirm-yes" type="button"></button>
+      <button id="btn-confirm-no" class="confirm-no" type="button" data-i18n="common.cancel">Cancel</button>
+    </div>
+  </div>
+</dialog>
+
+<!--
   A picture from the conversation, full screen. Filled from script; see ui/viewer.js.
   A dialog like every sheet, so Back and Escape close it without anything special.
 -->

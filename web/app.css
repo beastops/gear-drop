@@ -4983,3 +4983,94 @@ dialog.viewer[open] { animation: viewer-in var(--t) var(--ease) both; }
   .chat-typing span { animation: none; opacity: 0.7; }
   .heart-burst { display: none; }
 }
+
+/* ───────────────────────────── a question before something final ───────────────────────────── */
+
+/*
+ * The whole screen dims and a card asks. The dialog is the dim, so a tap on it, outside the
+ * card, is the tap outside that says no. Flat, not blurred, like every surface on a phone here.
+ */
+dialog.confirm {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  display: none;
+  place-items: center;
+  background: rgb(0 0 0 / 0.6);
+  color: var(--text);
+}
+dialog.confirm[open] {
+  display: grid;
+  animation: confirm-dim var(--t) var(--ease) both;
+}
+dialog.confirm::backdrop { background: transparent; }
+@keyframes confirm-dim {
+  from { background: rgb(0 0 0 / 0); }
+}
+.confirm-card {
+  width: min(100%, 380px);
+  padding: 24px 20px 16px;
+  border-radius: 22px;
+  background-color: var(--veil-solid);
+  box-shadow: var(--shadow-pop);
+  text-align: center;
+  animation: confirm-rise var(--spring-snap) both;
+}
+@keyframes confirm-rise {
+  from { opacity: 0; translate: 0 24px; scale: 0.96; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+.confirm-mark {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 12px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(var(--danger-rgb), 0.16);
+  color: var(--danger);
+}
+.confirm-mark svg { width: 24px; height: 24px; }
+.confirm-title { margin: 0 0 6px; font-size: 19px; line-height: 1.3; }
+.confirm-body { margin: 0 0 20px; color: var(--muted); font-size: 14.5px; line-height: 1.45; }
+.confirm-actions { display: flex; flex-direction: column; gap: 8px; }
+.confirm-yes,
+.confirm-no {
+  min-height: 50px;
+  border: 0;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: scale var(--t) var(--ease), filter var(--t) var(--ease);
+}
+.confirm-yes { background: var(--danger); color: #fff; }
+.confirm-no { background: var(--fill); color: var(--text); }
+.confirm-yes:active,
+.confirm-no:active { scale: 0.97; }
+.confirm-yes:hover { filter: brightness(1.08); }
+
+/* On a phone the card comes up from the bottom, where a thumb already is, and fills the width. */
+@media (pointer: coarse) {
+  dialog.confirm {
+    align-items: end;
+    padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+  }
+  .confirm-card { width: 100%; max-width: 520px; justify-self: center; }
+  /*
+   * And the delete button at the top of a conversation goes against the edge. The close button
+   * beside it is not shown on a phone, but it still took up its space and left the delete
+   * button a button's width in from the corner.
+   */
+  .chat-head-tools .close-x[data-close] { order: -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confirm-card { animation: none; }
+}

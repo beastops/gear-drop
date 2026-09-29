@@ -188,6 +188,11 @@ const ui = {
   chatClear: $('btn-chat-clear'),
   chatAttach: $('btn-chat-attach'),
   chatReply: $('chat-reply'),
+  confirm: $('confirm-dialog'),
+  confirmTitle: $('confirm-title'),
+  confirmBody: $('confirm-body'),
+  confirmYes: $('btn-confirm-yes'),
+  confirmNo: $('btn-confirm-no'),
   chatTyping: $('chat-typing'),
   chatTypingLabel: $('chat-typing-label'),
   chatReplyWho: $('chat-reply-who'),
@@ -3112,7 +3117,16 @@ async function forgetDevice(id, { theirs = false } = {}) {
    */
   const rec = app.paired.find((p) => p.id === id);
   if (!rec) return;
-  if (!theirs && rec.wipePending && !confirm(t('devices.unpairStrands', { name: rec.name || t('tile.unnamed') }))) return;
+  if (
+    !theirs &&
+    rec.wipePending &&
+    !(await askConfirm({
+      text: t('devices.unpairStrands', { name: rec.name || t('tile.unnamed') }),
+      yes: t('devices.unpair'),
+    }))
+  ) {
+    return;
+  }
 
   /*
    * Unpairing is meant to leave nothing behind, and a conversation is the most of something
@@ -4291,6 +4305,55 @@ function showOverChat(el) {
     el.popover = 'manual';
     el.showPopover();
   }
+}
+
+/**
+ * Ask before something that cannot be undone, on this app's own sheet.
+ *
+ * This used to be the browser's `confirm()`. Where a browser does not show one - an in-app
+ * browser, a web view, an installed web app on some phones - it answers "no" at once, so the
+ * button that asked silently did nothing; and where it does, it is a small grey box that does
+ * not say which app is asking. The whole screen dims and a card asks instead, with the question
+ * in bold and what it means under it. Cancel, a tap outside the card, Back and Escape all say
+ * no, and Cancel is where the focus starts, so a stray Enter does not delete anything.
+ */
+function askConfirm({ text, yes }) {
+  return new Promise((resolve) => {
+    const d = ui.confirm;
+    // The question, then what it means: split after the first question mark of any script.
+    const at = text.search(/[?？؟]/);
+    const title = at >= 0 ? text.slice(0, at + 1) : text;
+    const rest = at >= 0 ? text.slice(at + 1).trim() : '';
+    ui.confirmTitle.textContent = title;
+    ui.confirmBody.textContent = rest;
+    ui.confirmBody.hidden = !rest;
+    ui.confirmYes.textContent = yes;
+
+    let answered = false;
+    const finish = (value) => {
+      if (answered) return;
+      answered = true;
+      ui.confirmYes.removeEventListener('click', onYes);
+      ui.confirmNo.removeEventListener('click', onNo);
+      d.removeEventListener('click', onOutside);
+      d.removeEventListener('close', onClose);
+      if (d.open) d.close();
+      resolve(value);
+    };
+    const onYes = () => finish(true);
+    const onNo = () => finish(false);
+    const onClose = () => finish(false);
+    // The dialog itself is the dimmed screen; the card is inside it.
+    const onOutside = (e) => {
+      if (e.target === d) finish(false);
+    };
+    ui.confirmYes.addEventListener('click', onYes);
+    ui.confirmNo.addEventListener('click', onNo);
+    d.addEventListener('click', onOutside);
+    d.addEventListener('close', onClose);
+    d.showModal();
+    ui.confirmNo.focus();
+  });
 }
 
 /** What can be done with one message, in the order a menu shows it. */
@@ -6191,7 +6254,7 @@ function eraseRow() {
 }
 
 async function eraseEverything() {
-  if (!confirm(t('devices.eraseAsk'))) return;
+  if (!(await askConfirm({ text: t('devices.eraseAsk'), yes: t('devices.eraseGo') }))) return;
 
   /*
    * Stop everything that could write before anything is deleted.
@@ -6692,7 +6755,7 @@ function bindUi() {
     if (!chatPeerId) return;
     const { messages } = await chat.load(chatPeerId);
     if (!messages.length) return;
-    if (!confirm(t('chat.clearAsk'))) return;
+    if (!(await askConfirm({ text: t('chat.clearAsk'), yes: t('common.delete') }))) return;
     /*
      * Deleting a conversation deletes it for both people in it.
      *
