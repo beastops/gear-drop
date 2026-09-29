@@ -34,6 +34,7 @@ const WITH_VARS = new Set([
   'toast.verifiedWaiting',
   'toast.sendWhenReady',
   'chat.replyingTo',
+  'chat.reacted',
   'toast.sendLost',
   'chat.unsendLater',
   'chat.unsendHereOnly',

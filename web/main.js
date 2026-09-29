@@ -188,6 +188,8 @@ const ui = {
   chatClear: $('btn-chat-clear'),
   chatAttach: $('btn-chat-attach'),
   chatReply: $('chat-reply'),
+  chatTyping: $('chat-typing'),
+  chatTypingLabel: $('chat-typing-label'),
   chatReplyWho: $('chat-reply-who'),
   chatReplyText: $('chat-reply-text'),
   chatReplyCancel: $('btn-chat-reply-cancel'),
@@ -1191,6 +1193,7 @@ function wireTransport(conn, only) {
     setTimeout(() => {
       if (conn.closed) return;
       flushUnsendPending(conn).catch(() => {});
+      flushReactions(conn).catch(() => {});
       flushWaitingSends(conn).catch(() => {});
     }, FLUSH_SETTLE_MS);
     app.radar.burst();
@@ -1453,6 +1456,30 @@ function wireTransfers(conn) {
     const out = await chat.remove(conn.id, ids);
     if (out.removed.length && ui.chatDialog.open && chatPeerId === conn.id) dissolveBubbles(out.removed, out);
     conn.transfers.sendUnsent(items.map((i) => i.id)).catch(() => {});
+  });
+
+  /*
+   * The other device reacted to a message, or took a reaction back. Found the way a delete
+   * finds its message, and said in a notice only when the conversation is not open, where the
+   * badge appearing is the news.
+   */
+  transfers.addEventListener('react', async (e) => {
+    const { item, e: emoji } = e.detail;
+    const [id] = await chat.resolve(conn.id, [item]);
+    if (!id) return;
+    const out = await chat.react(conn.id, id, 'them', emoji);
+    if (!out.changed) return;
+    if (ui.chatDialog.open && chatPeerId === conn.id) {
+      renderChat(out.messages, { locked: out.locked, ephemeral: out.ephemeral, keepScroll: true });
+    } else if (emoji) {
+      toast(t('chat.reacted', { name: conn.name, emoji }));
+    }
+  });
+
+  // Typing, believed for a few seconds at a time.
+  transfers.addEventListener('typing', (e) => {
+    conn.typing = e.detail ? Date.now() + TYPING_LAPSE_MS : 0;
+    paintTyping(conn);
   });
 
   // The other device has done it: stop owing those.
@@ -2441,7 +2468,9 @@ function paintTile(tile, entry) {
   el.classList.remove('busy', 'sending', 'receiving');
   el.style.removeProperty('--p');
   refs.meta.textContent =
-    entry.state === 'paused'
+    entry.typing > Date.now()
+      ? t('chat.typing')
+      : entry.state === 'paused'
       ? t('st.paused')
       : entry.state === 'offline'
         ? t('st.offline')
@@ -4055,6 +4084,12 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
     onHold(row, () => openBubbleMenu(m, row));
     // Swiped to the right: answer it.
     onSwipeReply(row, () => startReply(m));
+    // Tapped twice: a heart, or the heart taken back.
+    onDoubleTap(row, () => {
+      const emoji = m.rx?.me === '❤️' ? '' : '❤️';
+      if (emoji) heartBurst(row, emoji);
+      reactTo(chatPeerId, m, emoji);
+    });
     // Answering something: what it answers, above the words.
     if (m.re) row.append(quoteFor(m, messages));
     // Written, not yet gone. The mark is on the bubble rather than in a status line, because
@@ -4098,6 +4133,11 @@ function renderChat(messages, { locked = false, ephemeral = false, keepScroll = 
     // On a pointer that hovers, the same delete sits beside the others.
     tools.append(bubbleTool('#i-trash', t('chat.deleteEveryone'), () => deleteMessages(chatPeerId, [m])));
     row.append(tools);
+    // The reactions on it, from either side, on its corner.
+    if (m.rx?.me || m.rx?.them) {
+      row.classList.add('has-rx');
+      row.append(reactionBadge(m));
+    }
     ui.chatLog.append(row);
 
     // One timestamp per run, under the last of it.
@@ -4206,23 +4246,15 @@ function openBubbleMenu(m, row) {
     el.append(b);
   };
 
+  // The six reactions first, the way a message's menu leads with them everywhere.
+  el.append(reactionBar(m, peerId, () => closeMenu()));
   for (const a of bubbleActions(m, peerId)) {
     if (a.danger) el.append(Object.assign(document.createElement('div'), { className: 'menu-sep' }));
     item(a.label, a.icon, a.run, { danger: a.danger });
   }
 
-  /*
-   * Above the conversation, which is a modal dialog in the top layer. A menu appended to the
-   * page would open underneath it. A popover is in the top layer too, and later, so on top; a
-   * browser without popovers gets it inside the dialog instead.
-   */
-  if (typeof el.showPopover === 'function') {
-    el.popover = 'manual';
-    document.body.append(el);
-    el.showPopover();
-  } else {
-    ui.chatDialog.append(el);
-  }
+  // Above the conversation, and able to be pressed: see `showOverChat`.
+  showOverChat(el);
 
   // Beside the message, on its own side, kept inside the window.
   const r = row.getBoundingClientRect();
@@ -4236,6 +4268,29 @@ function openBubbleMenu(m, row) {
 
   row.classList.add('menu-open');
   openMenu = { el, tile: row, back: back.open(() => closeMenu()) };
+}
+
+/**
+ * Show something over the open conversation that can actually be pressed.
+ *
+ * The conversation is a modal dialog, and while a modal dialog is open everything outside it
+ * is inert: drawn, but not there for a finger or a mouse. The message menus were popovers on
+ * the page itself, so they appeared on top and every tap on them fell through to the sheet
+ * underneath - Reply, Copy, Delete and the reactions did nothing except close the menu. Found
+ * with real touch input; clicking the buttons from script had passed, because a scripted click
+ * ignores inertness.
+ *
+ * Inside the dialog it is part of the modal and can be pressed, and as a popover it is still
+ * drawn above the dialog. Pointer events stop at it, so a drag on it is not also a drag of the
+ * sheet it sits in.
+ */
+function showOverChat(el) {
+  ui.chatDialog.append(el);
+  for (const type of ['pointerdown', 'pointermove', 'pointerup']) el.addEventListener(type, (e) => e.stopPropagation());
+  if (typeof el.showPopover === 'function') {
+    el.popover = 'manual';
+    el.showPopover();
+  }
 }
 
 /** What can be done with one message, in the order a menu shows it. */
@@ -4320,10 +4375,11 @@ function openFocusMenu(m, row, actions) {
     list.append(b);
   }
   layer.append(list);
+  const bar = reactionBar(m, row ? chatPeerId : null, () => closeMenu());
+  bar.classList.add('focus-reactions');
+  layer.append(bar);
 
-  layer.popover = 'manual';
-  document.body.append(layer);
-  layer.showPopover();
+  showOverChat(layer);
 
   /*
    * Where things go. The actions sit under the message on its own side; if they would run off
@@ -4337,18 +4393,232 @@ function openFocusMenu(m, row, actions) {
   const menuTop = Math.min(r.bottom + gap, innerHeight - h - edge);
   const lift = Math.min(0, menuTop - gap - r.bottom);
   const top = Math.max(edge, r.top + lift);
-  if (r.top + lift < edge) lifted.style.maxHeight = `${Math.max(60, menuTop - gap - edge)}px`;
+  if (r.top + lift < edge) {
+    lifted.style.maxHeight = `${Math.max(60, menuTop - gap - edge)}px`;
+    lifted.style.overflow = 'hidden';
+  }
   lifted.style.setProperty('--lift', `${top - r.top}px`);
   const left = m.dir === 'out' ? r.right - w : r.left;
   list.style.left = `${Math.round(Math.min(Math.max(edge, left), innerWidth - w - edge))}px`;
   list.style.top = `${Math.round(menuTop)}px`;
   list.style.transformOrigin = m.dir === 'out' ? 'top right' : 'top left';
 
-  dim.addEventListener('click', () => closeMenu());
-  lifted.addEventListener('click', () => closeMenu());
+  // The reactions above the message, or under the actions when there is no room above.
+  const bh = bar.offsetHeight;
+  const bw = bar.offsetWidth;
+  const above = top - gap - bh;
+  bar.style.top = `${Math.round(above >= edge ? above : Math.min(menuTop + h + gap, innerHeight - bh - edge))}px`;
+  const barLeft = m.dir === 'out' ? r.right - bw : r.left;
+  bar.style.left = `${Math.round(Math.min(Math.max(edge, barLeft), innerWidth - bw - edge))}px`;
+  bar.style.transformOrigin = m.dir === 'out' ? 'bottom right' : 'bottom left';
+
+  /*
+   * A tap outside the actions closes it - a tap that began here. Lifting the finger that held
+   * the message ends in a click too, on the copy now lying where the message was, and closing
+   * on that shut the menu the instant it opened.
+   */
+  let pressed = false;
+  layer.addEventListener('pointerdown', () => {
+    pressed = true;
+  });
+  const tappedOutside = () => {
+    if (pressed) closeMenu();
+  };
+  dim.addEventListener('click', tappedOutside);
+  lifted.addEventListener('click', tappedOutside);
 
   row.classList.add('menu-open', 'focused');
   openMenu = { el: layer, tile: row, back: back.open(() => closeMenu()) };
+}
+
+/**
+ * React to a message, or take a reaction back with ''.
+ *
+ * Here first, then to the other device. If it is not connected, or the frame does not go, the
+ * change is marked and sent the next time it is - taking a reaction back included.
+ */
+async function reactTo(peerId, m, emoji) {
+  if (!peerId || !m?.id) return;
+  const conn = app.conns.get(peerId);
+  const live = conn?.state === 'ready';
+  const out = await chat.react(peerId, m.id, 'me', emoji, { pending: !live });
+  if (!out.changed) return;
+  if (ui.chatDialog.open && chatPeerId === peerId) {
+    renderChat(out.messages, { locked: out.locked, ephemeral: out.ephemeral, keepScroll: true });
+  }
+  if (!live) return;
+  try {
+    await conn.transfers.sendReaction({ id: m.id, dir: m.dir, at: m.at, h: await chat.fingerprint(m) }, emoji);
+  } catch {
+    await chat.react(peerId, m.id, 'me', emoji, { pending: true });
+  }
+}
+
+/** Send the reactions made while the other device was away. */
+async function flushReactions(conn) {
+  const owed = await chat.pendingReactions(conn.id).catch(() => []);
+  if (!owed.length) return;
+  const { messages } = await chat.load(conn.id);
+  const sent = [];
+  for (const { id, e } of owed) {
+    const m = messages.find((x) => x.id === id);
+    if (!m) continue;
+    try {
+      await conn.transfers.sendReaction({ id, dir: m.dir, at: m.at, h: await chat.fingerprint(m) }, e);
+      sent.push(id);
+    } catch {
+      break; // the rest go on the next connection
+    }
+  }
+  if (sent.length) await chat.markReactionsSent(conn.id, sent);
+}
+
+/** The six reactions, as a row of buttons. The one already chosen is marked, and takes it back. */
+function reactionBar(m, peerId, done) {
+  const bar = document.createElement('div');
+  bar.className = 'reaction-bar';
+  bar.setAttribute('role', 'group');
+  bar.setAttribute('aria-label', t('chat.react'));
+  for (const emoji of chat.REACTIONS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'reaction' + (m.rx?.me === emoji ? ' chosen' : '');
+    b.textContent = emoji;
+    b.setAttribute('aria-pressed', String(m.rx?.me === emoji));
+    b.addEventListener('click', () => {
+      done?.();
+      reactTo(peerId || chatPeerId, m, m.rx?.me === emoji ? '' : emoji);
+    });
+    bar.append(b);
+  }
+  return bar;
+}
+
+/** The reactions on a message, on its corner. Tapping it takes your own back. */
+function reactionBadge(m) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'bubble-rx' + (m.rx.me ? ' mine' : '');
+  const { me, them } = m.rx;
+  b.textContent = me && them && me === them ? `${me} 2` : [them, me].filter(Boolean).join(' ');
+  b.setAttribute('aria-label', me ? t('chat.removeReaction') : t('chat.react'));
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (me) reactTo(chatPeerId, m, '');
+  });
+  return b;
+}
+
+/** A reaction landing, big for a moment over the message. */
+function heartBurst(row, emoji) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const host = ui.chatLog.closest('.chat-sheet');
+  if (!host) return;
+  const r = row.getBoundingClientRect();
+  const h = host.getBoundingClientRect();
+  const el = document.createElement('span');
+  el.className = 'heart-burst';
+  el.setAttribute('aria-hidden', 'true');
+  el.textContent = emoji;
+  el.style.left = `${r.left - h.left + r.width / 2}px`;
+  el.style.top = `${r.top - h.top + r.height / 2}px`;
+  host.append(el);
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 1000);
+}
+
+/**
+ * Two taps on a message.
+ *
+ * A finger's two quick taps close together, told from a hold (which waits for half a second)
+ * and a swipe (which moves). A mouse uses the browser's own double-click, and the word it
+ * selected along the way is let go. The time it happened is left on the row, so a photo that
+ * was about to open on the first tap knows not to.
+ */
+function onDoubleTap(row, fire) {
+  let down = null;
+  let last = null;
+  let firedAt = 0;
+  const skip = (e) => e.target.closest?.('button:not(.bubble-quote), a, input, .audio-track');
+  const go = () => {
+    firedAt = performance.now();
+    row.dataset.doubleTapped = String(firedAt);
+    navigator.vibrate?.(10);
+    fire();
+  };
+  row.addEventListener('pointerdown', (e) => {
+    down = e.pointerType === 'mouse' || skip(e) ? null : { x: e.clientX, y: e.clientY, t: performance.now() };
+  });
+  row.addEventListener('pointerup', (e) => {
+    if (!down) return;
+    const tap = Math.hypot(e.clientX - down.x, e.clientY - down.y) < 10 && performance.now() - down.t < 300;
+    down = null;
+    if (!tap) {
+      last = null;
+      return;
+    }
+    const now = performance.now();
+    if (last && now - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 30) {
+      last = null;
+      go();
+      return;
+    }
+    last = { t: now, x: e.clientX, y: e.clientY };
+  });
+  row.addEventListener('dblclick', (e) => {
+    if (skip(e) || performance.now() - firedAt < 500) return; // a finger's, already handled
+    getSelection()?.removeAllRanges();
+    go();
+  });
+}
+
+/* ------------------------------------------------------------ typing */
+
+/** How often "still typing" is said, and how long it is believed without being said again. */
+const TYPING_EVERY_MS = 3000;
+const TYPING_IDLE_MS = 5000;
+const TYPING_LAPSE_MS = 7000;
+const typingOut = { on: false, at: 0, idle: 0, peer: null };
+
+/**
+ * Tell the other device this side is typing. At most every few seconds, not per key, and a stop
+ * after a pause, an emptied box, or the conversation closing. A stop that never arrives does no
+ * harm: the other side lets it lapse.
+ */
+function noteTyping() {
+  const conn = app.conns.get(chatPeerId);
+  if (!conn || conn.state !== 'ready') return;
+  clearTimeout(typingOut.idle);
+  if (!ui.chatInput.value.trim()) return stopTyping();
+  const now = Date.now();
+  if (!typingOut.on || typingOut.peer !== conn.id || now - typingOut.at > TYPING_EVERY_MS) {
+    typingOut.on = true;
+    typingOut.at = now;
+    typingOut.peer = conn.id;
+    conn.transfers.sendTyping(true).catch(() => {});
+  }
+  typingOut.idle = setTimeout(stopTyping, TYPING_IDLE_MS);
+}
+
+function stopTyping({ quiet = false } = {}) {
+  clearTimeout(typingOut.idle);
+  if (!typingOut.on) return;
+  typingOut.on = false;
+  // After a message is sent there is nothing to say: its arrival ends the typing over there.
+  if (!quiet) app.conns.get(typingOut.peer)?.transfers?.sendTyping(false).catch(() => {});
+}
+
+/** Show whether the other side is typing, in the conversation and on its tile. */
+function paintTyping(conn) {
+  const on = conn.typing > Date.now();
+  if (ui.chatDialog.open && chatPeerId === conn.id) {
+    ui.chatTyping.hidden = !on;
+    ui.chatTypingLabel.hidden = !on;
+  }
+  const tile = tileFor(conn.id);
+  if (tile && !conn.progress) paintTile(tile, conn);
+  clearTimeout(conn.typingTimer);
+  if (on) conn.typingTimer = setTimeout(() => paintTyping(conn), conn.typing - Date.now() + 50);
 }
 
 /** Answer this message: the bar above the keyboard says which, and the next message does. */
@@ -4678,11 +4948,17 @@ function photoFigure(m) {
   // swallows the click that follows one.
   img.addEventListener('click', () => {
     if (!img.currentSrc) return; // still decrypting, or could not be drawn
-    openViewer(document.getElementById('photo-viewer'), {
-      src: img.currentSrc,
-      alt: m.name || '',
-      onSave: () => saveChatMedia(m),
-    });
+    // A moment's wait, so the second tap of a double tap reacts instead of opening it.
+    const row = img.closest('.bubble');
+    const at = performance.now();
+    setTimeout(() => {
+      if (Number(row?.dataset.doubleTapped || 0) > at - 50) return;
+      openViewer(document.getElementById('photo-viewer'), {
+        src: img.currentSrc,
+        alt: m.name || '',
+        onSave: () => saveChatMedia(m),
+      });
+    }, 280);
   });
   wrap.append(img);
 
@@ -5398,6 +5674,7 @@ function paintChatState() {
 async function openChat(peerId) {
   const entry = currentEntry(peerId);
   if (!entry) return;
+  stopTyping();
   chatPeerId = peerId;
   cancelReply();
   ui.chatWho.textContent = entry.name;
@@ -5406,6 +5683,7 @@ async function openChat(peerId) {
 
   const conn = app.conns.get(peerId);
   if (conn) setRail(ui.chatDialog, conn);
+  ui.chatTyping.hidden = ui.chatTypingLabel.hidden = !(conn?.typing > Date.now());
 
   chatToken++;
 
@@ -5427,6 +5705,7 @@ async function sendChat() {
   // What this answers, if anything. Taken now and cleared, so it answers exactly one message.
   const re = replyTo?.id || '';
   cancelReply();
+  stopTyping({ quiet: true });
 
   /*
    * Nowhere to send it right now, and somewhere to send it later.
@@ -5778,6 +6057,9 @@ async function keepChatMedia(conn, result, entry, { voice = false, dur = 0, tran
  * one-shot dialog did and is still the right answer for something that just arrived.
  */
 async function onChatText(conn, { body, mid, re }) {
+  // A message is the end of the typing that wrote it.
+  conn.typing = 0;
+  paintTyping(conn);
   const { messages, locked, ephemeral } = await chat.append(conn.id, { dir: 'in', text: body, id: mid, re });
 
   if (ui.chatDialog.open && chatPeerId === conn.id) {
@@ -6366,6 +6648,8 @@ function bindUi() {
       }
     });
   }
+  ui.chatInput.addEventListener('input', noteTyping);
+  ui.chatDialog.addEventListener('close', () => stopTyping());
   ui.chatReplyCancel.addEventListener('click', () => {
     cancelReply();
     ui.chatInput.focus();

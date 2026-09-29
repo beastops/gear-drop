@@ -416,6 +416,71 @@ export async function fingerprint(m) {
   return [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * The reactions a conversation allows.
+ *
+ * A fixed few, so a reaction is never free text: one arriving from the other device is checked
+ * against this list, and anything else is treated as taking the reaction away.
+ */
+export const REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
+export const isReaction = (e) => REACTIONS.includes(e);
+
+/**
+ * Set one side's reaction to a message, or take it away with ''. `who` is 'me' or 'them'.
+ *
+ * `pending` marks a change of mine that has not reached the other device yet, taking a
+ * reaction away included, so it can be sent when that device is back.
+ */
+export function react(peerId, id, who, emoji, { pending = false } = {}) {
+  return serialise(peerId, () => reactNow(peerId, id, who, emoji, pending));
+}
+
+async function reactNow(peerId, id, who, emoji, pending) {
+  const { messages, locked, ephemeral } = await load(peerId);
+  const m = !locked && messages.find((x) => x.id === id);
+  if (!m || (who !== 'me' && who !== 'them')) return { messages, locked, ephemeral, changed: false, message: null };
+
+  const rx = { ...(m.rx || {}) };
+  if (isReaction(emoji)) rx[who] = emoji;
+  else delete rx[who];
+  if (who === 'me') {
+    if (pending) rx.mePending = true;
+    else delete rx.mePending;
+  }
+  if (Object.keys(rx).length) m.rx = rx;
+  else delete m.rx;
+
+  if (isDurable(peerId)) await save(peerId, messages);
+  else session.set(peerId, messages);
+  return { messages, locked: false, ephemeral, changed: true, message: m };
+}
+
+/** My reactions still to be told to the other device: `{ id, e }`, with '' for taken away. */
+export async function pendingReactions(peerId) {
+  const { messages } = await load(peerId);
+  return messages.filter((m) => m.rx?.mePending).map((m) => ({ id: m.id, e: m.rx.me || '' }));
+}
+
+export function markReactionsSent(peerId, ids) {
+  return serialise(peerId, async () => {
+    const done = new Set(ids);
+    const { messages, locked } = await load(peerId);
+    if (locked) return;
+    let touched = false;
+    for (const m of messages) {
+      if (!done.has(m.id) || !m.rx?.mePending) continue;
+      const rx = { ...m.rx };
+      delete rx.mePending;
+      if (Object.keys(rx).length) m.rx = rx;
+      else delete m.rx;
+      touched = true;
+    }
+    if (!touched) return;
+    if (isDurable(peerId)) await save(peerId, messages);
+    else session.set(peerId, messages);
+  });
+}
+
 /** How far apart two clocks' ideas of the same moment are allowed to be, for an old message. */
 const MATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
 

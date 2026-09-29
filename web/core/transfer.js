@@ -17,7 +17,7 @@ import { transfers as transferStore } from './store.js';
 import { ReplayWindow, ratchetPair } from './session.js';
 import { addRange, contiguous, covered } from './ranges.js';
 import { safeFileName } from './filename.js';
-import { plausibleDuration, isMessageId } from './chat.js';
+import { plausibleDuration, isMessageId, isReaction } from './chat.js';
 import { checkThumb } from './thumb.js';
 
 const VER = 1;
@@ -400,6 +400,18 @@ export class TransferManager extends EventTarget {
         if (items.length) this.dispatchEvent(new CustomEvent('unsend', { detail: items }));
         return;
       }
+      case 'react': {
+        // One message and one of the fixed reactions. Anything that is not one of them is a
+        // reaction taken away, never words put on somebody's message.
+        const item = cleanUnsend(msg.item);
+        if (!item) return;
+        this.dispatchEvent(new CustomEvent('react', { detail: { item, e: isReaction(msg.e) ? msg.e : '' } }));
+        return;
+      }
+      case 'typing':
+        // Yes or no, and the other side lets a yes lapse by itself.
+        this.dispatchEvent(new CustomEvent('typing', { detail: msg.on === true }));
+        return;
       case 'unsent': {
         // The other device has done it. What clears the request this side was holding.
         const ids = (Array.isArray(msg.ids) ? msg.ids : []).slice(0, MAX_UNSEND).filter(isMessageId);
@@ -466,6 +478,21 @@ export class TransferManager extends EventTarget {
   sendUnsend(items) {
     const clean = (items || []).map(cleanUnsend).filter(Boolean).slice(0, MAX_UNSEND);
     return this._sendCtl({ t: 'unsend', items: clean });
+  }
+
+  /**
+   * React to a message, or take a reaction back with ''. The message is named the way a delete
+   * names one, so an older message without a shared id can still be found.
+   */
+  sendReaction(item, emoji) {
+    const clean = cleanUnsend(item);
+    if (!clean) return Promise.resolve();
+    return this._sendCtl({ t: 'react', item: clean, e: isReaction(emoji) ? emoji : '' });
+  }
+
+  /** Say whether this side is typing to the other. */
+  sendTyping(on) {
+    return this._sendCtl({ t: 'typing', on: !!on });
   }
 
   /** Confirm those are gone here, found or not, so the other side stops asking. */

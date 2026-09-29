@@ -115,9 +115,18 @@ test('on a phone, holding a message lifts it over the whole screen', () => {
   assert.match(menu, /matchMedia\('\(pointer: coarse\)'\)\.matches/);
   assert.match(menu, /openFocusMenu\(/);
   const focus = body('function openFocusMenu(m, row, actions)');
-  // In the top layer, above the conversation's own dialog, and closed by Back like any menu.
-  assert.match(focus, /showPopover\(\)/);
+  // Above the conversation, and closed by Back like any menu.
+  assert.match(focus, /showOverChat\(layer\)/);
   assert.match(focus, /back\.open\(/);
+  /*
+   * And inside the conversation's dialog, where it can be pressed. Outside a modal dialog
+   * everything is inert: the menus were drawn on top and every tap fell through them. Found
+   * with real touch; a scripted click had passed, because it ignores inertness.
+   */
+  const over = body('function showOverChat(el)');
+  assert.match(over, /ui\.chatDialog\.append\(el\)/);
+  assert.ok(!/document\.body\.append/.test(over), 'a menu over the chat is back outside the modal, where it is inert');
+  assert.match(body('function openBubbleMenu(m, row)'), /showOverChat\(el\)/);
   assert.match(CSS, /\.focus-layer\s*\{[^}]*inset:\s*0/, 'the layer does not cover the screen');
 });
 

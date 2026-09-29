@@ -727,7 +727,8 @@
     </div>
 
     <h2><span id="chat-title" data-i18n="chat.title">Chat</span>
-      <span class="h2-sub"><span data-i18n="chat.with">With</span> <span id="chat-who" class="strong"></span></span>
+      <span class="h2-sub"><span data-i18n="chat.with">With</span> <span id="chat-who" class="strong"></span>
+        <span id="chat-typing-label" class="chat-typing-label" data-i18n="chat.typing" hidden>typing…</span></span>
     </h2>
 
     <!--
@@ -750,6 +751,8 @@
       without interrupting whatever is being read, which is what a conversation wants.
     -->
     <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions"></div>
+    <!-- Three dots while the other side is typing. The label in the heading says it in words. -->
+    <div class="chat-typing" id="chat-typing" aria-hidden="true" hidden><span></span><span></span><span></span></div>
 
     <p class="chat-note muted small" id="chat-empty" data-i18n="chat.empty" hidden>
       Nothing here yet. Anything either of you sends stays on your two devices.
