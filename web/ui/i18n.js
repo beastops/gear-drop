@@ -390,6 +390,9 @@ const en = {
   /* the passphrase lock */
 
   'lock.title': 'Locked',
+  'tab.elsewhere': 'Gear Drop is open in another tab',
+  'tab.elsewhereSub': 'It runs in one tab at a time. This one takes over by itself when the other one closes.',
+  'tab.useHere': 'Use here',
   'lock.sub': 'This device is protected by a passphrase. Nothing here can be read without it.',
   'lock.passphrase': 'Passphrase',
   'lock.unlock': 'Unlock',

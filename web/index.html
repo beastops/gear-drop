@@ -31,6 +31,7 @@
 <link rel="modulepreload" href="core/filename.js">
 <link rel="modulepreload" href="core/gdcrypto.js">
 <link rel="modulepreload" href="core/ice.js">
+<link rel="modulepreload" href="core/one-tab.js">
 <link rel="modulepreload" href="core/picker.js">
 <link rel="modulepreload" href="core/platform.js">
 <link rel="modulepreload" href="core/qr.js">
@@ -537,6 +538,20 @@
 
     <div class="device-rows" id="device-rows"></div>
 
+  </div>
+</dialog>
+
+<!-- ──────────────────────────── another tab has it ────────────────────────── -->
+<!--
+  Every tab of the site in one browser is the same device, so only one runs; see core/one-tab.js.
+  Shown instead of the app in a tab that is waiting, which has read and sent nothing.
+-->
+<dialog id="elsewhere" class="sheet" data-no-swipe aria-labelledby="elsewhere-title">
+  <div class="sheet-body rail-accent">
+    <h2><span id="elsewhere-title" data-i18n="tab.elsewhere">Gear Drop is open in another tab</span>
+      <span class="h2-sub" data-i18n="tab.elsewhereSub">It runs in one tab at a time. This one takes over by itself when the other one closes.</span>
+    </h2>
+    <button id="btn-use-here" class="cta wide" type="button" data-i18n="tab.useHere">Use here</button>
   </div>
 </dialog>
 

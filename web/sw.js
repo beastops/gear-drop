@@ -6,7 +6,7 @@
  * operating system hands one over through the share sheet, and even then it only carries
  * it across to the page. It is never uploaded, cached, or written anywhere.
  */
-const VERSION = 'gd-v2.85.1';
+const VERSION = 'gd-v2.86.0';
 const SHELL = [
   './',
   'index.html',
@@ -43,6 +43,7 @@ const SHELL = [
   'ui/when.js',
   'ui/push.js',
   'core/chat.js',
+  'core/one-tab.js',
 
   /*
    * The crypto, which was never here.

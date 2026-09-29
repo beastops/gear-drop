@@ -61,6 +61,7 @@ import { openViewer } from './ui/viewer.js';
 import { layoutOf, stampOf, initialsOf } from './ui/when.js';
 import { enableEdgeBack, EDGE_PX } from './ui/push.js';
 import { captureDust } from './core/dust.js';
+import { claimTab } from './core/one-tab.js';
 
 const te = new TextEncoder();
 const td = new TextDecoder();
@@ -201,6 +202,8 @@ const ui = {
   chatReplyWho: $('chat-reply-who'),
   chatReplyText: $('chat-reply-text'),
   chatReplyCancel: $('btn-chat-reply-cancel'),
+  elsewhere: $('elsewhere'),
+  useHere: $('btn-use-here'),
   lockDialog: $('lock-dialog'),
   lockNow: $('btn-lock-now'),
   lockChange: $('btn-lock-change'),
@@ -345,6 +348,15 @@ async function boot() {
   await setLocale(app.prefs.lang || preferredLocale());
 
   /*
+   * One tab at a time, and before anything else. See `core/one-tab.js`.
+   *
+   * A tab that is waiting has not asked for the passphrase, opened the relay socket or said a
+   * word to the network, so the tab that is live is the only one the network ever meets. A tab
+   * that loses reloads, which drops everything it had, and comes back up waiting.
+   */
+  await untilThisTabIsLive();
+
+  /*
    * Nothing is read before this.
    *
    * With a passphrase set there is no key on the device, so its own identity and every
@@ -468,6 +480,46 @@ async function boot() {
   bootStep('restoreDiscovery', () => restoreDiscovery());
   bootStep('handleUrlFragment', () => handleUrlFragment());
   bootStep('render', () => render());
+}
+
+const ASLEEP_KEY = 'gd-asleep';
+
+function untilThisTabIsLive() {
+  let asleep = false;
+  try {
+    // Read once and forgotten: reloading this tab later is opening it again, and the newest wins.
+    asleep = sessionStorage.getItem(ASLEEP_KEY) === '1';
+    sessionStorage.removeItem(ASLEEP_KEY);
+  } catch {
+    /* no session storage: start as any new tab would */
+  }
+  let waiting = false;
+  const tab = claimTab({
+    asleep,
+    isBusy: () => transferInFlight(),
+    onWaiting: () => {
+      waiting = true;
+      ui.elsewhere.showModal();
+    },
+    onLost: () => {
+      try {
+        sessionStorage.setItem(ASLEEP_KEY, '1');
+      } catch {
+        /* then it comes back as a new tab, and takes over again: no worse than before */
+      }
+      location.reload();
+    },
+  });
+  // It cannot be dismissed: under it is an app that has not started.
+  ui.elsewhere.addEventListener('cancel', (e) => e.preventDefault());
+  ui.elsewhere.addEventListener('close', () => {
+    if (waiting) ui.elsewhere.showModal();
+  });
+  ui.useHere.onclick = () => tab.takeOver();
+  return tab.live.then(() => {
+    waiting = false;
+    if (ui.elsewhere.open) ui.elsewhere.close();
+  });
 }
 
 /**
