@@ -537,7 +537,9 @@ export class TransferManager extends EventTarget {
     };
     this.out.set(transferId, job);
 
-    await this._sendCtl({
+    // A manifest that never went out leaves no job behind: the caller holds the files and
+    // offers them again once the link can carry them, under a new id.
+    const sent = this._sendCtl({
       t: 'manifest',
       transferId,
       total,
@@ -565,6 +567,12 @@ export class TransferManager extends EventTarget {
       thumb: checkThumb(thumb),
       files: entries.map((e) => ({ id: e.id, name: e.name, path: e.path, size: e.size, mime: e.mime })),
     });
+    try {
+      await sent;
+    } catch (err) {
+      this.out.delete(transferId);
+      throw err;
+    }
 
     this.dispatchEvent(new CustomEvent('offered', { detail: { transferId, total, count: files.length } }));
     return transferId;

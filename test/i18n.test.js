@@ -32,7 +32,8 @@ const SHIPPED = Object.fromEntries(
 const WITH_VARS = new Set([
   'incoming.many',
   'toast.verifiedWaiting',
-  'toast.stillConnecting',
+  'toast.sendWhenReady',
+  'toast.sendLost',
   'chat.unsendLater',
   'chat.unsendHereOnly',
   'toast.unpairedBy',
@@ -48,7 +49,6 @@ const WITH_VARS = new Set([
   'devices.unpairStrands',
   'toast.relaySwitched',
   'toast.dropped',
-  'toast.relayOffer',
   'toast.relaying',
   'toast.direct',
   'toast.resume.many',

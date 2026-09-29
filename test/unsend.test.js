@@ -229,5 +229,5 @@ test('a delete that cannot be delivered now is owed, and cleared only when answe
   assert.match(MAIN, /unsendPending/);
   assert.match(MAIN, /transfers\.addEventListener\('unsent'/);
   // Sent again every time the device connects, after the settle the outbox waits for.
-  assert.match(MAIN, /if \(!conn\.closed\) flushUnsendPending\(conn\)/);
+  assert.match(MAIN, /if \(conn\.closed\) return;\n\s+flushUnsendPending\(conn\)/);
 });

@@ -57,10 +57,10 @@ all it does. Here's the honest list of what it gets.
 - Who you are, or which device is which.
 - Enough to pretend to be one of your devices, or to recognise you next time you show up.
 
-If your network blocks the direct connection, the app offers to pass the data through that same
-server instead. It asks first, every time, and switches back to direct as soon as it can. Even
-on that path everything is locked twice over, so the server is just shifting sealed bytes it
-can't open. And when things go quiet it keeps topping the connection up, so "how much did they
+If your network blocks the direct connection, the data goes through that same server instead,
+on its own after a few seconds, and switches back to direct as soon as it can. Even on that
+path everything is locked twice over, so the server is just shifting sealed bytes it can't
+open, and neither device learns where the other one is. And when things go quiet it keeps topping the connection up, so "how much did they
 send" doesn't have a clean answer either.
 
 You don't have to take our word for any of this. It's a few hundred lines, there's no build

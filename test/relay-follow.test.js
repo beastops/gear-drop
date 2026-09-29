@@ -53,19 +53,59 @@ test('following does not depend on a setting, or on a question already being on 
   assert.ok(!/allowRelay|relayAsked/.test(follow), 'following is gated on something the other device already answered');
 });
 
-test('the question is taken off the screen once it has been answered either way', () => {
-  assert.match(body('function offerRelay(conn, why)'), /conn\.relayToast = toast\(/);
-  assert.match(body('async function useRelay(conn, why)'), /conn\.relayToast\?\.remove\(\)/);
-  assert.match(body("function toast(text, tone = '', opts = {})"), /return el;/, 'a notice cannot be taken back');
+/*
+ * And then there is no question at all.
+ *
+ * Even with one tap moving both devices, nothing could be sent until somebody tapped, and a
+ * banner that disappears in fourteen seconds is easy to miss. From the outside that is the app
+ * failing to send. A direct link that is not up after a few seconds now moves both devices to
+ * the encrypted connection by itself.
+ */
+test('a direct link that cannot be made moves both devices over without asking', () => {
+  const offer = body('function offerRelay(conn, why)');
+  assert.match(offer, /session\.send\(\{ t: 'relay-request' \}\)/, 'the other device is not taken along');
+  assert.match(offer, /useRelay\(conn, why\)/);
+  assert.ok(!/toast\(|allowRelay/.test(offer), 'it is a question again');
+  const wait = Number(/const FALLBACK_AFTER_MS = (\d+);/.exec(MAIN)?.[1]);
+  assert.ok(wait > 0 && wait <= 5000, `a failed direct attempt holds files back for ${wait} ms`);
 });
 
-test('nothing is offered down a link that is not open yet, and saying so is not "Couldn\'t send"', () => {
+/*
+ * "Sending should never error."
+ *
+ * Picking a device that is still connecting, or whose link drops under the offer, used to
+ * answer "Couldn't send" and later "Still connecting". Neither is anything a person can act on
+ * except by trying again, so the app tries again: the send waits and goes when the link opens.
+ */
+test('a send to a device that is not ready yet waits for it instead of failing', () => {
   for (const sig of ['async function sendFiles(connId, fileList)', 'async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {})']) {
     const fn = body(sig);
-    const check = fn.indexOf("if (conn.state !== 'ready') return toast(notReady(conn), 'bad');");
-    assert.ok(check > 0, `${sig} offers before the link is open`);
+    const check = fn.indexOf("if (conn.state !== 'ready') return waitToSend(conn, {");
+    assert.ok(check > 0, `${sig} refuses a device that is still connecting`);
     assert.ok(check < fn.indexOf('transfers.offer('), `${sig} checks after offering`);
+    assert.match(fn, /if \(linkDown\(err\)\) return waitToSend\(conn, \{/, `${sig} gives up when the link drops under it`);
+    assert.ok(!/notReady|stillConnecting/.test(fn));
   }
-  // A message to a remembered device waits in the outbox rather than failing.
-  assert.match(body('async function sendChat()'), /if \(!conn \|\| conn\.state !== 'ready'\)/);
+  // What was waiting goes when the link opens, with the outbox and owed deletes.
+  assert.match(MAIN, /flushWaitingSends\(conn\)\.catch/);
+  assert.match(body('async function flushWaitingSends(conn)'), /conn\.state !== 'ready'/);
+  // Text waits in the outbox for any conversation, not only a remembered one.
+  const say = body('async function sendChat()');
+  assert.match(say, /if \(!conn && !chat\.isDurable\(chatPeerId\)\) return;/);
+  assert.match(say, /if \(linkDown\(err\)\)/);
+});
+
+test('an offer whose manifest never went leaves nothing behind to go stale', async () => {
+  // The files are offered again under a new id once the link is back; the first job must not
+  // linger as an offer the other side never saw.
+  const { TransferManager } = await import('../web/core/transfer.js');
+  const tm = Object.create(TransferManager.prototype);
+  tm.out = new Map();
+  tm.transport = { chunkSize: 65536 };
+  tm.session = { transferKey: async () => null };
+  tm._sendCtl = async () => {
+    throw new Error('control path is not open');
+  };
+  await assert.rejects(tm.offer([new File([new Uint8Array(3)], 'a.bin')]), /control path is not open/);
+  assert.equal(tm.out.size, 0, 'a job was left behind for an offer that never went');
 });

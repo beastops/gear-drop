@@ -300,16 +300,8 @@ const app = {
      * streams into the one file chosen: faster, but a real location, so it is opt-in.
      */
     saveTo: 'sandbox',
-    /**
-     * Strict peer-to-peer, on by default.
-     *
-     * The bytes of a transfer go device to device. When a network blocks WebRTC outright
-     * there is a fallback carrying the same sealed frames over the rendezvous socket, where
-     * the relay handles AEAD ciphertext and stores none of it. That is still bytes passing
-     * through someone else's machine, so it is never entered silently: the app asks every
-     * time, and the answer is not remembered.
-     */
-    allowRelay: false,
+    // No `allowRelay` any more: the encrypted connection is used when a direct one cannot be
+    // made, without asking. See `offerRelay`. A value stored by an older version is ignored.
   },
 };
 
@@ -1089,51 +1081,39 @@ const RETRY_AFTER_MS = [700, 1800, 3600];
 /** How long after a link opens before anything held back is sent down it. */
 const FLUSH_SETTLE_MS = 400;
 
-const FALLBACK_AFTER_MS = 9000;
-/** How long before an unanswered relay prompt is put back on screen. */
-const RELAY_REASK_MS = 20_000;
+/**
+ * How long a direct attempt on the same network gets before the encrypted connection is used.
+ *
+ * On a network that allows it, a direct connection is up in well under a second. One that is
+ * not up after five is behind something that will not let it through - an emulator's own
+ * network, a guest Wi-Fi that isolates devices, a VPN - and waiting longer only means files
+ * waiting longer.
+ */
+const FALLBACK_AFTER_MS = 5000;
 
 function armFallback(conn) {
   clearTimeout(conn.fallbackTimer);
   conn.fallbackTimer = setTimeout(() => {
     if (conn.state === 'ready' || conn.usingRelay || conn.closed) return;
     offerRelay(conn, 'why.network');
-  }, conn.relayAsked ? RELAY_REASK_MS : FALLBACK_AFTER_MS);
+  }, FALLBACK_AFTER_MS);
 }
 
 /**
- * Ask about moving a stalled connection onto the relay.
+ * Move a connection that cannot go direct onto the encrypted connection, and take the other
+ * device with it.
  *
- * Asked more than once, because a toast disappears: anyone not looking at that moment never
- * saw the question, and both devices then sat unable to connect with nothing to act on. That
- * is common now that a device can decline direct connections, since the peer is then always
- * the one who has to answer.
+ * This used to be a question, asked with a banner and a button on both devices. Sending never
+ * worked until somebody tapped it on one of them, which from the outside looks exactly like
+ * the app failing to send, and the banner was gone again in fourteen seconds. The answer
+ * never changed anything worth asking about: the encrypted connection carries the same sealed
+ * frames, it is the path this app already treats as the more private one because it hands
+ * neither device the other's address, and it is left again the moment a direct link comes up.
  */
 function offerRelay(conn, why) {
   if (conn.usingRelay || conn.closed) return;
-
-  if (app.prefs.allowRelay) {
-    conn.relayAsked = true;
-    conn.session.send({ t: 'relay-request' })?.catch?.(() => {});
-    useRelay(conn, why);
-    return;
-  }
-
-  // Don't stack prompts: one at a time, re-offered on the fallback cadence.
-  if (conn.relayAsked && Date.now() - conn.relayAsked < RELAY_REASK_MS) return;
-  conn.relayAsked = Date.now();
-
-  conn.relayToast = toast(t('toast.relayOffer', { name: conn.name, why: t(why) }), 'bad', {
-    label: t('action.useRelay'),
-    action: () => {
-      conn.session.send({ t: 'relay-request' })?.catch?.(() => {});
-      useRelay(conn, why);
-    },
-    hold: 14_000,
-  });
-
-  // And put the question back on screen if it is still unanswered.
-  armFallback(conn);
+  conn.session.send({ t: 'relay-request' })?.catch?.(() => {});
+  useRelay(conn, why);
 }
 
 /**
@@ -1160,9 +1140,6 @@ function followRelay(conn) {
 async function useRelay(conn, why) {
   if (conn.usingRelay || conn.closed) return;
   conn.usingRelay = true;
-  // A question still on screen about this is answered now, one way or the other.
-  conn.relayToast?.remove();
-  conn.relayToast = null;
   conn.rtc = conn.transport; // kept, in case it comes good later
 
   const relay = new RelayTransport(conn.session);
@@ -1171,7 +1148,8 @@ async function useRelay(conn, why) {
   wireTransport(conn, relay);
   await relay.start();
 
-  toast(t('toast.relaying', { name: conn.name, why: t(why) }), 'bad');
+  // Said, not warned: it is working, and slower is the only difference anyone will notice.
+  toast(t('toast.relaying', { name: conn.name, why: t(why) }));
   render();
 
   // If the direct path completes later, take it: it is faster, and the relay stops seeing
@@ -1195,7 +1173,6 @@ function wireTransport(conn, only) {
     if (conn.transport !== transport) return; // a superseded path
     clearTimeout(conn.fallbackTimer);
     conn.state = 'ready';
-    conn.relayAsked = false;
     transfers._sendCtl({ t: 'rename', name: app.name }).catch(() => {});
     // Anything this device was still owed is sent the moment it is reachable again.
     flushWipePending(conn);
@@ -1203,7 +1180,9 @@ function wireTransport(conn, only) {
     // After the same settle the outbox waits for: a frame sent the instant this side's channel
     // opens can land before the other side is listening, and a delete has no reply to miss.
     setTimeout(() => {
-      if (!conn.closed) flushUnsendPending(conn).catch(() => {});
+      if (conn.closed) return;
+      flushUnsendPending(conn).catch(() => {});
+      flushWaitingSends(conn).catch(() => {});
     }, FLUSH_SETTLE_MS);
     app.radar.burst();
     render();
@@ -1896,6 +1875,11 @@ function dropChannelPeer(idKey, { keepBusy = true } = {}) {
   }
   app.chanPeers.delete(idKey);
   entry.session.destroy();
+  const waiting = waitingSends.get(`chan:${idKey}`);
+  if (waiting?.length) {
+    waitingSends.delete(`chan:${idKey}`);
+    toast(t('toast.sendLost', { name: entry.member?.name || t('tile.unnamed') }), 'bad');
+  }
 }
 
 function addAlso(peerId, channel) {
@@ -3148,14 +3132,47 @@ async function offerPreview(files) {
   }
 }
 
+/**
+ * Sends waiting for a connection that cannot carry them yet, by device.
+ *
+ * Picking a device that is still connecting - or that has just dropped and is coming back -
+ * used to answer "Couldn't send", and later "Still connecting". Neither is something anyone
+ * can act on except by trying again, so the app does the trying: the files wait here and go
+ * the moment the link opens. In memory only; a closed tab takes the wait with it.
+ */
+const waitingSends = new Map(); // conn id -> [{ files } | { media, opts }]
+
+function waitToSend(conn, entry) {
+  const list = waitingSends.get(conn.id) || [];
+  list.push(entry);
+  waitingSends.set(conn.id, list);
+  toast(t('toast.sendWhenReady', { name: conn.name }));
+}
+
+/** Send whatever was waiting for this connection, now that it can carry it. */
+async function flushWaitingSends(conn) {
+  const list = waitingSends.get(conn.id);
+  if (!list?.length || conn.closed || conn.state !== 'ready') return;
+  waitingSends.delete(conn.id);
+  for (const w of list) {
+    if (w.media) await sendChatMedia(conn.id, w.media, w.opts);
+    else await sendFiles(conn.id, w.files);
+  }
+}
+
+/** An error that only means the link was not there at that instant. */
+function linkDown(err) {
+  const m = String(err?.message || '');
+  return m.includes('control path is not open') || m.includes('control frame was not sent');
+}
+
 async function sendFiles(connId, fileList) {
   const conn = app.conns.get(connId);
   if (!conn) return toast(t('toast.notConnected'), 'bad');
   const files = [...(fileList || [])];
   if (!files.length) return;
-  // An offer needs a link to go down. Before there is one, "Couldn't send" reads as something
-  // wrong with the file, when all it needs is a moment.
-  if (conn.state !== 'ready') return toast(notReady(conn), 'bad');
+  // An offer needs a link to go down. Before there is one the files wait for it.
+  if (conn.state !== 'ready') return waitToSend(conn, { files });
 
   /*
    * The words, before the first file goes to a device nobody has checked.
@@ -3184,6 +3201,8 @@ async function sendFiles(connId, fileList) {
     await conn.transfers.offer(files, { thumb: await offerPreview(files) });
     toast(files.length === 1 ? t('toast.offer.one', { name: conn.name }) : t('toast.offer.many', { n: files.length, name: conn.name }));
   } catch (err) {
+    // The link went between the check above and the offer: wait for it, as above.
+    if (linkDown(err)) return waitToSend(conn, { files });
     toast(humanError(err?.message, 'toast.sendFailed'), 'bad');
   }
 }
@@ -3802,6 +3821,10 @@ async function rememberPair(conn) {
    */
   if (heldSend?.connId === oldId) heldSend.connId = id;
   if (chatPeerId === oldId) chatPeerId = id;
+  if (waitingSends.has(oldId)) {
+    waitingSends.set(id, waitingSends.get(oldId));
+    waitingSends.delete(oldId);
+  }
   for (const note of chatTransfers.values()) if (note?.id === oldId) note.id = id;
   await chat.adopt(oldId, id).catch(() => {});
 
@@ -5071,10 +5094,8 @@ async function sendChat() {
   // Not here, or here and not able to carry anything yet: a remembered device's message waits
   // in the outbox, which is sent the moment the link opens.
   if (!conn || conn.state !== 'ready') {
-    if (!chat.isDurable(chatPeerId)) {
-      if (conn) toast(notReady(conn), 'bad');
-      return;
-    }
+    // A device that is not here at all and was never paired has no next time to wait for.
+    if (!conn && !chat.isDurable(chatPeerId)) return;
     ui.chatInput.value = '';
     ui.chatInput.style.height = '';
     const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true, id: chat.newId() });
@@ -5091,7 +5112,13 @@ async function sendChat() {
   const id = chat.newId();
   try {
     await conn.transfers.sendText(body, id);
-  } catch {
+  } catch (err) {
+    if (linkDown(err)) {
+      const held = await chat.append(chatPeerId, { dir: 'out', text: body, pending: true, id });
+      renderChat(held.messages, { locked: held.locked, ephemeral: held.ephemeral });
+      paintChatState();
+      return;
+    }
     toast(t('toast.sendFailed'), 'bad');
     // Put it back rather than losing what was typed.
     ui.chatInput.value = body;
@@ -5282,15 +5309,10 @@ async function destroyConversation(id, { tell = false, owe = true } = {}) {
  * server in this path at all, and on the rare occasion the relay is carrying the connection it
  * is carrying the same ciphertext it carries for everything else.
  */
-/** Why a connection that exists cannot carry anything yet, in words. */
-function notReady(conn) {
-  return conn.state === 'connecting' ? t('toast.stillConnecting', { name: conn.name }) : t('toast.notConnected');
-}
-
 async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
   const conn = app.conns.get(peerId);
   if (!conn || !file) return;
-  if (conn.state !== 'ready') return toast(notReady(conn), 'bad');
+  if (conn.state !== 'ready') return waitToSend(conn, { media: file, opts: { voice, dur } });
 
   /*
    * Something a conversation should not be holding still gets sent.
@@ -5327,6 +5349,7 @@ async function sendChatMedia(peerId, file, { voice = false, dur = 0 } = {}) {
   try {
     transferId = await conn.transfers.offer([file], { chat: true, voice, dur: known });
   } catch (err) {
+    if (linkDown(err)) return waitToSend(conn, { media: file, opts: { voice, dur } });
     return toast(t(err?.name === 'BusyError' ? 'chat.photoBusy' : 'toast.sendFailed'), 'bad');
   }
 
