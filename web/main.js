@@ -331,7 +331,7 @@ const back = createBackStack();
  * The build this page is. Shipped inside the page, so it is the copy actually running rather
  * than whatever the server has most recently; kept equal to the worker's VERSION by a test.
  */
-const BUILD = 'gd-v2.90.0';
+const BUILD = 'gd-v2.90.1';
 
 /** The resting tab icon, remembered before the progress ring ever replaces it. */
 let baseFavicon = null;
@@ -1047,12 +1047,14 @@ function attachSession(session, { peer = null, viaCode = false, member = null, c
         existing.theirWordsOk = false;
         existing.sas = null;
         // The old words must not stay on screen to be confirmed for the new key.
+        // Asked again with the new words when they come, whoever the device is, if the question
+        // was on screen or anything is held waiting for its answer.
+        if (verifying === existing || heldSends.some((w) => w.connId === existing.id)) existing.reask = true;
         if (verifying === existing) {
           verifying = null;
           ui.verify.close();
-          // And asked again with the new words when they come, whoever the device is: what was
-          // held for this answer is still waiting on it.
-          existing.reask = true;
+          // A question queued for another device meanwhile goes ahead.
+          askNextPair();
         }
       }
       try {
